@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "ProductivityTracker",
+    "slug": "productivity-tracker",
+    "version": "1.1.0",
+    "orientation": "portrait",
+    "icon": "src/components/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "backgroundColor": "#0D0D0F"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.yourname.productivitytracker"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0D0D0F"
+      },
+      "package": "com.yourname.productivitytracker",
+      "permissions": [
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "src/components/warning.png",
+          "color": "#7C6FFF",
+          "sounds": []
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "e035514d-283b-475f-af15-477b4f790b40"
+      }
+    }
+  }
+}
