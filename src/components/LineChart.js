@@ -32,7 +32,7 @@ export default function LineChart({
   const { COLORS } = useTheme();
   const [width, setWidth] = useState(0);
 
-  const Y_AXIS_W = 32;     // px reserved on the left for tick labels
+  const Y_AXIS_W = 17;     // px reserved on the left for tick labels
   const X_AXIS_H = 22;     // px reserved at the bottom for labels
   const PAD_TOP = 8;
   const PAD_BOTTOM = 4;
@@ -83,7 +83,7 @@ export default function LineChart({
                     color: COLORS.textMuted,
                     position: 'absolute',
                     top: top - 6,
-                    right: 4,
+                    right: 12 ,
                   },
                 ]}
               >
@@ -185,28 +185,50 @@ export default function LineChart({
         </View>
       </View>
 
-      {/* X-axis labels — passed-through `xToPx` so callers can hand us
-          day numbers when the chart resizes, otherwise raw pixel offsets. */}
-      <View style={[styles.xAxis, { height: X_AXIS_H, marginLeft: Y_AXIS_W }]}>
+      {/* X-axis labels — positioned as a percentage of the plot width so
+          they auto-resize with the chart and never depend on the first
+          onLayout measurement. Each label is centered on its tick via
+          `translateX(-16)` (half of the 32-px cell width). */}
+      <View
+        style={[
+          styles.xAxis,
+          { height: X_AXIS_H, marginLeft: Y_AXIS_W, width: plotW },
+        ]}
+        pointerEvents="none"
+      >
         {xLabels.map((lab, i) => {
-          const px = xToPx(lab.x) - Y_AXIS_W;
-          const left = px - 12;
+          // Fractional position (0..1) within the plot area, clamped. RN
+          // doesn't support `calc()` in stylesheets, so we use a plain
+          // percentage and re-center with a translateX.
+          const frac = plotW > 0
+            ? Math.max(0, Math.min(1, (xToPx(lab.x) - Y_AXIS_W) / plotW))
+            : 0;
           return (
-            <Text
+            <View
               key={i}
               style={[
-                styles.xLabel,
+                styles.xLabelWrap,
                 {
-                  color: COLORS.textMuted,
                   position: 'absolute',
-                  left,
-                  top: 4,
-                  fontWeight: lab.emph ? '800' : '600',
+                  left: `${frac * 100}%`,
+                  top: 1,
+                  backgroundColor: COLORS.surfaceAlt,
+                  opacity: plotW > 0 ? 1 : 0,
                 },
               ]}
             >
-              {lab.label}
-            </Text>
+              <Text
+                style={[
+                  styles.xLabel,
+                  {
+                    color: lab.emph ? COLORS.text : COLORS.textMuted,
+                    fontWeight: lab.emph ? '800' : '700',
+                  },
+                ]}
+              >
+                {lab.label}
+              </Text>
+            </View>
           );
         })}
       </View>
@@ -264,8 +286,18 @@ const styles = StyleSheet.create({
   yAxis: { position: 'relative' },
   yLabel: { fontSize: 10, fontWeight: '600', textAlign: 'right' },
 
-  xAxis: { position: 'relative' },
-  xLabel: { fontSize: 10, width: 24, textAlign: 'center' },
+  xAxis: { position: 'relative', overflow: 'visible' },
+  xLabelWrap: {
+    width: 32,
+    height: 18,
+    borderRadius: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    // Each label sits at its tick's x%; shift the cell left by half its
+    // width so the tick mark visually passes through the cell center.
+    transform: [{ translateX: -16 }],
+  },
+  xLabel: { fontSize: 11, width: 32, textAlign: 'center' },
 
   emptyOverlay: {
     position: 'absolute',

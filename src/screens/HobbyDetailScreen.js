@@ -1,6 +1,6 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,10 +9,14 @@ import { useApp, todayKey } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { useTheme, FONTS, RADIUS, SHADOW, SPACING } from '../utils/theme';
 import { currentStreak, longestStreak, lastNDays, dayKey } from '../utils/hobbyStats';
-import { format, startOfYear, getDay, addDays, subDays } from 'date-fns';
+import { format, getDay, startOfMonth, addMonths, getDaysInMonth } from 'date-fns';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 const CHART_HEIGHT = 130;
 const CHART_BAR_GAP = 6;
+// Square size for each day-cell in the all-time history grid. Matches the
+// look of the 7-day mini-chart at the top so the two read as one design.
+const MONTH_CELL = 18;
 
 function WeekChart({ hobby, COLORS }) {
   const days = lastNDays(7);
@@ -51,125 +55,118 @@ function WeekChart({ hobby, COLORS }) {
   );
 }
 
-function YearGrid({ hobby, COLORS }) {
-  // Build a Mon-first weekly grid. Trim the trailing weeks to the one
-  // containing today so the user can never scroll into the future — only
-  // into the past.
-  const today = new Date();
-  const yearStart = startOfYear(today);
-  const firstDay = getDay(yearStart); // 0 = Sun
-  const offsetDays = (firstDay + 6) % 7; // shift to Mon-first
-  const gridStart = subDays(yearStart, offsetDays);
+// Day-of-week labels shown in the left column of every month block.
+// Order is Mon-first (Monday = 0) so it lines up with the row indexing.
+const DOW_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-  const weeks = [];
-  let cursor = new Date(gridStart);
-  // Stop at the week containing today (its Sunday is the last cell of that
-  // week). We don't push any weeks whose first day is after today.
-  while (true) {
-    const week = [];
-    for (let d = 0; d < 7; d++) {
-      week.push(new Date(cursor));
-      cursor = addDays(cursor, 1);
-    }
-    weeks.push(week);
-    // Week's Monday (= week[0]) is already past today → this was the last
-    // week we need. Break BEFORE pushing it if it's a wholly-future week.
-    if (week[0] > today) {
-      weeks.pop();
-      break;
-    }
-    // Safety cap — never loop forever.
-    if (weeks.length >= 60) break;
-  }
-
-  // Month labels: only the FIRST week of each month (chronological order).
-  const monthLabels = [];
-  let lastMonth = -1;
-  weeks.forEach((week, i) => {
-    const wk = week[0];
-    if (wk.getMonth() !== lastMonth && wk.getFullYear() === today.getFullYear()) {
-      monthLabels.push({ i, label: format(wk, 'MMM') });
-      lastMonth = wk.getMonth();
-    }
-  });
-
-  // Cell sizing must match the styles below: 14 + 3 (gap).
-  const CELL = 14;
-  const GAP = 3;
-  const cellStride = CELL + GAP;
-
-  // Scroll-to-end on first layout so the user lands on today (latest, right side).
-  const scrollRef = useRef(null);
-  const [didScroll, setDidScroll] = useState(false);
-  const onContentSizeChange = () => {
-    if (didScroll) return;
-    setDidScroll(true);
-    requestAnimationFrame(() => {
-      scrollRef.current?.scrollToEnd({ animated: false });
-    });
-  };
+function MonthBlock({ monthDate, hobby, COLORS, today }) {
+  const daysInMonth = getDaysInMonth(monthDate);
+  const firstDow = getDay(monthDate); // 0 = Sun
+  // Convert Sun-first index to Mon-first index so the first row is Monday.
+  const leadingBlanks = (firstDow + 6) % 7;
 
   return (
-    <ScrollView
-      horizontal
-      ref={scrollRef}
-      showsHorizontalScrollIndicator={false}
-      onContentSizeChange={onContentSizeChange}
-    >
-      <View>
-        {/* Month labels row — scrolls along with the grid below */}
-        <View style={[styles.gridHeader, { width: weeks.length * cellStride - GAP }]}>
-          {monthLabels.map((m) => (
-            <Text
-              key={m.i}
-              style={[
-                styles.gridMonthLabel,
-                { color: COLORS.textMuted, left: m.i * cellStride },
-              ]}
-              numberOfLines={1}
-            >
-              {m.label}
-            </Text>
-          ))}
-        </View>
+    <View style={[styles.monthBlock, { borderColor: COLORS.border }]}>
+      <Text style={[styles.monthTitle, { color: COLORS.text }]}>
+        {format(monthDate, 'MMMM yyyy')}
+      </Text>
 
-        {/* Grid cells — same width so labels stay aligned as the user scrolls */}
-        <View style={[styles.gridContainer, { width: weeks.length * cellStride - GAP }]}>
-          {weeks.map((week, i) => (
-            <View key={i} style={styles.gridCol}>
-              {week.map((d) => {
-                const inYear = d.getFullYear() === today.getFullYear();
-                const k = dayKey(d);
-                const isDone = inYear && hobby.completions && hobby.completions[k];
-                const isFuture = d > today;
-                return (
-                  <View
-                    key={k}
-                    style={[
-                      styles.gridCell,
-                      {
-                        backgroundColor: !inYear
-                          ? 'transparent'
-                          : isDone
-                            ? hobby.color
-                            : isFuture
-                              ? 'transparent'
-                              : COLORS.border,
-                      },
-                    ]}
-                  />
-                );
-              })}
-            </View>
-          ))}
+      {/* Body: 7 weekday rows. Each row has its short label on the left
+          and a horizontally-scrollable strip of cells, one per day. Cells
+          are placed only where (day - 1 + leadingBlanks) % 7 === rowIndex.
+          Each populated cell shows its day number on top so the user can
+          read the date without a separate header row that would scroll
+          out of sync. */}
+      {DOW_LABELS.map((label, rowIdx) => (
+        <View key={label} style={styles.monthRow}>
+          <View style={styles.dowLabelCol}>
+            <Text style={[styles.dowLabel, { color: COLORS.textMuted }]}>{label}</Text>
+          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.monthCellsScroll}
+          >
+            {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => {
+              const colIdx = d - 1 + leadingBlanks;
+              const belongsHere = colIdx % 7 === rowIdx;
+              const date = new Date(monthDate.getFullYear(), monthDate.getMonth(), d);
+              const k = dayKey(date);
+              const isDone = !!(hobby.completions && hobby.completions[k]);
+              const isFuture = date > today;
+              const isToday = k === todayKey();
+              return (
+                <View
+                  key={d}
+                  style={[
+                    styles.monthCell,
+                    {
+                      width: MONTH_CELL,
+                      height: MONTH_CELL,
+                      backgroundColor: !belongsHere
+                        ? 'transparent'
+                        : isDone
+                          ? hobby.color
+                          : isFuture
+                            ? 'transparent'
+                            : COLORS.border,
+                      borderColor: isToday ? hobby.color : 'transparent',
+                      borderWidth: isToday ? 2 : 0,
+                      // Hide non-matching cells completely so they don't
+                      // waste a slot in the horizontal scroll.
+                      opacity: belongsHere ? 1 : 0,
+                    },
+                  ]}
+                >
+                  {belongsHere && !isFuture && (
+                    <Text style={[styles.monthCellNum, { color: COLORS.textMuted }]}>{d}</Text>
+                  )}
+                  {belongsHere && isFuture && (
+                    <Text style={[styles.monthCellNum, { color: COLORS.textMuted, opacity: 0.4 }]}>{d}</Text>
+                  )}
+                </View>
+              );
+            })}
+          </ScrollView>
         </View>
-      </View>
-    </ScrollView>
+      ))}
+    </View>
   );
 }
 
-function isLeap(y) {
-  return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+function YearGrid({ hobby, COLORS }) {
+  // Oldest month at top → current month at bottom (matches a calendar /
+  // log timeline). Each month is a separate block whose width is dictated
+  // by the number of days in that month.
+  const today = new Date();
+  const createdAt = hobby.createdAt ? new Date(hobby.createdAt) : today;
+  const startMonth = startOfMonth(createdAt);
+  const endMonth = startOfMonth(today);
+
+  const months = [];
+  let cursor = startMonth;
+  while (cursor <= endMonth) {
+    months.push(new Date(cursor));
+    cursor = addMonths(cursor, 1);
+    if (months.length > 240) break; // safety cap — 20 years of history
+  }
+
+  // The screen already wraps this in a vertical ScrollView, so the
+  // month list is just a plain View here. Each month block internally
+  // scrolls horizontally to fit 28-31 day-columns.
+  return (
+    <View>
+      {months.map((m) => (
+        <MonthBlock
+          key={m.toISOString()}
+          monthDate={m}
+          hobby={hobby}
+          COLORS={COLORS}
+          today={today}
+        />
+      ))}
+    </View>
+  );
 }
 
 export default function HobbyDetailScreen() {
@@ -200,23 +197,17 @@ export default function HobbyDetailScreen() {
   const totalDays = objectCount(hobby.completions);
   const memberSince = format(new Date(hobby.createdAt), 'MMM d, yyyy');
 
-  const handleDelete = () => {
-    Alert.alert(
-      'Delete hobby',
-      `Delete "${hobby.name}"? This also removes its history.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            deleteHobby(hobby.id);
-            toast.danger('Hobby deleted');
-            navigation.goBack();
-          },
-        },
-      ]
-    );
+  // Confirm-dialog visibility — opening the dialog is just a state flip,
+  // the actual deletion is gated on the user tapping Delete inside it.
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const handleDelete = () => setConfirmOpen(true);
+
+  const confirmDelete = () => {
+    setConfirmOpen(false);
+    deleteHobby(hobby.id);
+    toast.danger('Hobby deleted');
+    navigation.goBack();
   };
 
   return (
@@ -232,7 +223,12 @@ export default function HobbyDetailScreen() {
             <Ionicons name="chevron-back" size={20} color={COLORS.text} />
           </TouchableOpacity>
           <Text style={[styles.title, { color: COLORS.text }]}>Hobby</Text>
-          <View style={{ width: 36 }} />
+          <TouchableOpacity
+            onPress={() => navigation.navigate('EditHobby', { hobby })}
+            style={[styles.backBtn, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}
+          >
+            <Ionicons name="pencil-outline" size={18} color={COLORS.text} />
+          </TouchableOpacity>
         </View>
 
         {/* Hero card */}
@@ -306,6 +302,18 @@ export default function HobbyDetailScreen() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      <ConfirmDialog
+        visible={confirmOpen}
+        title="Delete hobby"
+        message={`Delete "${hobby.name}"? This also removes its history.`}
+        icon="trash-outline"
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={confirmDelete}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -361,11 +369,21 @@ const styles = StyleSheet.create({
   chartBar: { width: '80%', borderRadius: 4 },
   chartLabel: { fontSize: 10, fontWeight: '700' },
 
-  gridHeader: { height: 16, position: 'relative', marginBottom: SPACING.xs },
-  gridMonthLabel: { fontSize: 10, fontWeight: '700', position: 'absolute' },
-  gridContainer: { flexDirection: 'row', gap: 3 },
-  gridCol: { gap: 3 },
-  gridCell: { width: 14, height: 14, borderRadius: 3 },
+  // All-time history — one block per month.
+  monthBlock: {
+    borderWidth: 1,
+    borderRadius: RADIUS.md,
+    padding: SPACING.sm,
+    marginBottom: SPACING.md,
+    backgroundColor: 'transparent',
+  },
+  monthTitle: { ...FONTS.subheading, fontSize: 13, marginBottom: SPACING.sm },
+  monthRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 3 },
+  dowLabelCol: { width: 36, alignItems: 'flex-start', justifyContent: 'center' },
+  dowLabel: { fontSize: 10, fontWeight: '700' },
+  monthCellsScroll: { flexDirection: 'row' },
+  monthCell: { borderRadius: 3, marginRight: 3, alignItems: 'center', justifyContent: 'center' },
+  monthCellNum: { fontSize: 8, fontWeight: '700' },
 
   deleteBtn: {
     flexDirection: 'row',

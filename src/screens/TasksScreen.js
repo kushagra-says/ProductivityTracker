@@ -11,6 +11,7 @@ import { useToast } from '../context/ToastContext';
 import { useTheme, FONTS, RADIUS, SHADOW, SPACING } from '../utils/theme';
 import { relTime } from '../utils/relTime';
 import { usePullRefresh } from '../hooks/usePullRefresh';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 const FILTERS = ['All', 'Pending', 'Completed', 'Expired'];
 
@@ -18,6 +19,19 @@ const FALLBACK_CATEGORY_ICON = 'folder-outline';
 
 function isIoniconsName(s) {
   return typeof s === 'string' && /^[a-z]+(?:-outline)?$/.test(s);
+}
+
+// Pick the most recent valid timestamp from a list. Missing/invalid
+// values are coerced to the epoch so they sort to the bottom rather than
+// raising an error mid-sort.
+function maxDate(...values) {
+  let max = 0;
+  for (const v of values) {
+    if (!v) continue;
+    const t = new Date(v).getTime();
+    if (!Number.isNaN(t) && t > max) max = t;
+  }
+  return new Date(max).toISOString();
 }
 
 export default function TasksScreen() {
@@ -29,6 +43,9 @@ export default function TasksScreen() {
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [catFilter, setCatFilter] = useState(null);
+  // Pending delete — held in state so we can show the themed ConfirmDialog
+  // and only fire deleteTask after the user confirms.
+  const [pendingDelete, setPendingDelete] = useState(null);
 
   const tasks = useMemo(() => {
     let list = state.tasks.map((t) => {
@@ -46,21 +63,25 @@ export default function TasksScreen() {
           (t.notes || '').toLowerCase().includes(search.toLowerCase()),
       );
     }
-    return list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    // "Most recent on top" = whichever timestamp was touched last on the
+    // task (creation, edit, or completion). Edits and completions therefore
+    // bubble a task back to the top instead of being stuck in creation order.
+    return list.sort((a, b) => {
+      const aRecent = maxDate(a.createdAt, a.updatedAt, a.completedAt);
+      const bRecent = maxDate(b.createdAt, b.updatedAt, b.completedAt);
+      return new Date(bRecent) - new Date(aRecent);
+    });
   }, [state.tasks, filter, catFilter, search]);
 
   const handleDelete = (id) => {
-    Alert.alert('Delete task', 'Are you sure?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          deleteTask(id);
-          toast.danger('Task deleted');
-        },
-      },
-    ]);
+    setPendingDelete(id);
+  };
+
+  const confirmDelete = () => {
+    if (!pendingDelete) return;
+    deleteTask(pendingDelete);
+    toast.danger('Task deleted');
+    setPendingDelete(null);
   };
 
   const handleComplete = (id) => {
@@ -103,7 +124,7 @@ export default function TasksScreen() {
                 { color: task.status !== 'pending' ? COLORS.textMuted : COLORS.text },
                 task.status !== 'pending' && styles.struck,
               ]}
-              numberOfLines={2}
+              numberOfLines={3}
             >
               {task.title}
             </Text>
@@ -114,7 +135,7 @@ export default function TasksScreen() {
           </View>
 
           {task.notes ? (
-            <Text style={[styles.notes, { color: COLORS.textSub }]} numberOfLines={2}>
+            <Text style={[styles.notes, { color: COLORS.textSub }]}>
               {task.notes}
             </Text>
           ) : null}
@@ -276,6 +297,17 @@ export default function TasksScreen() {
             <Text style={[styles.emptyText, { color: COLORS.textMuted }]}>No tasks found</Text>
           </View>
         }
+      />
+
+      <ConfirmDialog
+        visible={!!pendingDelete}
+        title="Delete task?"
+        message="This task and its reminders will be removed permanently."
+        icon="trash-outline"
+        confirmLabel="Delete"
+        destructive
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
       />
     </SafeAreaView>
   );

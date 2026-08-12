@@ -10,6 +10,7 @@ import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { useTheme, FONTS, RADIUS, SHADOW, SPACING } from '../utils/theme';
 import { usePullRefresh } from '../hooks/usePullRefresh';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 const ICONS = [
   'book-outline', 'home-outline', 'barbell-outline', 'briefcase-outline',
@@ -42,6 +43,11 @@ export default function CategoriesScreen() {
   const [selectedIcon, setSelectedIcon] = useState(ICONS[0]);
   const [selectedColor, setSelectedColor] = useState(COLOR_OPTIONS[0]);
 
+  // Pending category awaiting delete confirmation. When set, the themed
+  // ConfirmDialog is shown instead of a native Alert.alert so the styling
+  // matches the rest of the app.
+  const [pendingDelete, setPendingDelete] = useState(null);
+
   const handleAdd = () => {
     if (!newName.trim()) {
       Alert.alert('Name required', 'Please enter a category name.');
@@ -56,25 +62,25 @@ export default function CategoriesScreen() {
   };
 
   const handleDelete = (cat) => {
-    const taskCount = state.tasks.filter(t => t.categoryId === cat.id).length;
-    Alert.alert(
-      'Delete category',
-      taskCount > 0
-        ? `"${cat.name}" has ${taskCount} task(s). Deleting it will unlink those tasks. Continue?`
-        : `Delete "${cat.name}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            deleteCategory(cat.id);
-            toast.danger('Category deleted');
-          },
-        },
-      ]
-    );
+    // Open the themed confirm dialog; the actual deletion runs once the
+    // user taps Delete inside the modal.
+    setPendingDelete(cat);
   };
+
+  const confirmDelete = () => {
+    if (!pendingDelete) return;
+    deleteCategory(pendingDelete.id);
+    toast.danger('Category deleted');
+    setPendingDelete(null);
+  };
+
+  const cancelDelete = () => setPendingDelete(null);
+
+  // Message for the confirm dialog — surfaces the task count so the user
+  // knows deleting will unlink any tasks that referenced this category.
+  const pendingTaskCount = pendingDelete
+    ? state.tasks.filter(t => t.categoryId === pendingDelete.id).length
+    : 0;
 
   const renderCategory = ({ item: cat }) => {
     const tasks = state.tasks.filter(t => t.categoryId === cat.id);
@@ -241,6 +247,24 @@ export default function CategoriesScreen() {
           </View>
         </View>
       </Modal>
+
+      <ConfirmDialog
+        visible={!!pendingDelete}
+        title="Delete category"
+        message={
+          pendingDelete
+            ? (pendingTaskCount > 0
+                ? `"${pendingDelete.name}" has ${pendingTaskCount} task${pendingTaskCount !== 1 ? 's' : ''}. Deleting it will unlink those tasks. Continue?`
+                : `Delete "${pendingDelete.name}"?`)
+            : ''
+        }
+        icon="trash-outline"
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={confirmDelete}
+        onCancel={cancelDelete}
+      />
     </SafeAreaView>
   );
 }

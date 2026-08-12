@@ -16,6 +16,7 @@ import AddTaskScreen         from './src/screens/AddTaskScreen';
 import CategoriesScreen      from './src/screens/CategoriesScreen';
 import HobbiesScreen         from './src/screens/HobbiesScreen';
 import HobbyDetailScreen     from './src/screens/HobbyDetailScreen';
+import EditHobbyScreen       from './src/screens/EditHobbyScreen';
 import InsightsScreen        from './src/screens/InsightsScreen';
 import EditCategoryScreen    from './src/screens/EditCategoryScreen';
 import SettingsScreen        from './src/screens/SettingsScreen';
@@ -37,6 +38,7 @@ function HobbiesStack() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="HobbiesList"  component={HobbiesScreen} />
       <Stack.Screen name="HobbyDetail"  component={HobbyDetailScreen} />
+      <Stack.Screen name="EditHobby"    component={EditHobbyScreen} />
     </Stack.Navigator>
   );
 }

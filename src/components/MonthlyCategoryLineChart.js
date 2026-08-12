@@ -1,14 +1,16 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import {
-  format, startOfMonth, endOfMonth, startOfDay, endOfDay, isWithinInterval, subMonths,
+  format, startOfMonth, endOfMonth, subMonths,
 } from 'date-fns';
 import { useTheme, FONTS, RADIUS, SPACING } from '../utils/theme';
 import LineChart, { ChartLegend } from './LineChart';
 
 /**
  * One line per category that had at least one completed task in the selected month.
- * X-axis runs from day 1 → end of month (or today, if current month).
+ * X-axis is static for the whole month — always day 1 → last day of the month,
+ * including future days which simply read as 0. This avoids layout churn as
+ * days tick over (the source of the historical rendering bug).
  * Width is fluid: the inner chart adapts to whatever width the parent gives it.
  */
 export default function MonthlyCategoryLineChart({ tasks, categories }) {
@@ -18,9 +20,11 @@ export default function MonthlyCategoryLineChart({ tasks, categories }) {
   const isCurrentMonth = format(selectedMonth, 'yyyy-MM') === format(new Date(), 'yyyy-MM');
   const monthStart = startOfMonth(selectedMonth);
   const monthEnd = endOfMonth(selectedMonth);
-  const daysInMonth = isCurrentMonth
-    ? new Date().getDate()
-    : monthEnd.getDate();
+  // Static date range — always 1..last day of the selected month, even for
+  // the current month. Future days show as 0 so the x-axis never grows
+  // and the chart never has to recompute its widths/positions as time
+  // passes. This was the source of the rendering bug.
+  const daysInMonth = monthEnd.getDate();
 
   // Days array: dates for each day in this month window.
   const days = useMemo(() => {
@@ -32,20 +36,22 @@ export default function MonthlyCategoryLineChart({ tasks, categories }) {
   }, [monthStart, daysInMonth]);
 
   // Build per-category per-day counts of completed tasks.
+  // Single pass over `tasks`: bucket each completed task by categoryId +
+  // `yyyy-MM-dd` of completion. Then map buckets onto the static days
+  // array, defaulting missing days (including future ones) to 0.
+  // This is O(tasks + cats*days) instead of O(cats*days*tasks).
   const dailyCounts = useMemo(() => {
+    const buckets = new Map(); // key: `${catId}|${yyyy-MM-dd}` -> count
+    for (const t of tasks) {
+      if (t.status !== 'completed' || !t.completedAt) continue;
+      const d = new Date(t.completedAt);
+      const key = `${t.categoryId}|${format(d, 'yyyy-MM-dd')}`;
+      buckets.set(key, (buckets.get(key) || 0) + 1);
+    }
     return categories.map((cat) => {
       const data = days.map((d) => {
-        const count = tasks.filter(
-          (t) =>
-            t.categoryId === cat.id &&
-            t.status === 'completed' &&
-            t.completedAt &&
-            isWithinInterval(new Date(t.completedAt), {
-              start: startOfDay(d),
-              end: endOfDay(d),
-            }),
-        ).length;
-        return { day: d.getDate(), count };
+        const key = `${cat.id}|${format(d, 'yyyy-MM-dd')}`;
+        return { day: d.getDate(), count: buckets.get(key) || 0 };
       });
       return { ...cat, daily: data };
     });
@@ -59,26 +65,33 @@ export default function MonthlyCategoryLineChart({ tasks, categories }) {
 
   // Data points use 1-based day numbers as their x. The LineChart's xToPx
   // adapter (set below) maps (day, plotW, yAxisW) → pixel position.
+  // Include ALL days of the month (zero on inactive days) so the line dips
+  // to the baseline on idle days instead of bridging across them.
   const series = visibleCats.map((cat) => ({
     color: cat.color,
     name: cat.name,
     hidden: !!hidden[cat.id],
-    data: cat.daily
-      .filter((d) => d.count > 0)
-      .map((d) => ({ x: d.day, y: d.count })),
+    data: cat.daily.map((d) => ({ x: d.day, y: d.count })),
   }));
 
   const yMax = Math.max(1, ...series.flatMap((s) => s.data.map((p) => p.y)));
 
-  // X-axis ticks: every ~7 days, plus today if in current month.
+  // X-axis ticks: every 5 days, plus the last day of the month so 29/30/31
+  // day months get a marker at the right edge instead of stopping at 28.
+  // With a static axis, these are stable for the whole month — the graph
+  // never has to relayout as days tick over.
   const xLabels = [];
-  const tickDays = [1, 7, 14, 21, 28].filter((d) => d <= daysInMonth);
+  const tickDays = [1, 5, 10, 15, 20, 25, 30].filter((d) => d <= daysInMonth);
   tickDays.forEach((d) => {
     xLabels.push({ x: d, label: String(d) });
   });
+  // Always show the month-end label when it isn't already covered.
+  if (daysInMonth >= 29 && !tickDays.includes(daysInMonth)) {
+    xLabels.push({ x: daysInMonth, label: String(daysInMonth) });
+  }
   if (isCurrentMonth) {
     const todayDay = new Date().getDate();
-    if (todayDay > 28) {
+    if (todayDay > 28 && todayDay !== daysInMonth) {
       xLabels.push({ x: todayDay, label: String(todayDay), emph: true });
     }
   }

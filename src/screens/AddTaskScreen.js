@@ -1,35 +1,140 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
-  ScrollView, Alert, Platform, Modal, Switch,
+  ScrollView, Alert, Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { useTheme, FONTS, RADIUS, SHADOW, SPACING } from '../utils/theme';
 import PrimaryButton from '../components/PrimaryButton';
-import { format, addMinutes } from 'date-fns';
+import InlineTimePicker from '../components/InlineTimePicker';
+import InlineDatePicker from '../components/InlineDatePicker';
+import { format, addMinutes, isPast, isToday } from 'date-fns';
 import { relTime } from '../utils/relTime';
 
-const genId  = () => `task_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-const genHId = () => `hobby_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-const genRId = () => `r_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+const genId = () => `task_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
-const REMINDER_PRESETS = [
-  { label: '5 min before',  minutes: -5 },
-  { label: '15 min before', minutes: -15 },
-  { label: '30 min before', minutes: -30 },
-  { label: '1 hr before',   minutes: -60 },
-  { label: '2 hrs before',  minutes: -120 },
-  { label: '1 day before',  minutes: -1440 },
-  { label: 'Custom time',   minutes: null },
+// Preset offsets for the "before expiry" reminder. `null` opens a custom
+// stepper controlled by `customBeforeExpiry`.
+const BEFORE_EXPIRY_PRESETS = [
+  { label: '5 min',     minutes: 5 },
+  { label: '15 min',    minutes: 15 },
+  { label: '30 min',    minutes: 30 },
+  { label: '1 hour',    minutes: 60 },
+  { label: '2 hours',   minutes: 120 },
+  { label: '1 day',     minutes: 1440 },
+  { label: 'Custom…',   minutes: null },
 ];
 
+const DEFAULT_CUSTOM_BEFORE_EXPIRY = 45; // minutes — used when the user picks "Custom"
+
+/**
+ * Reads the first non-empty HH:mm portion of a Date so we can render a
+ * short summary next to the date stepper.
+ */
+function describeDateTime(d) {
+  if (!d) return null;
+  return {
+    date: d,
+    formatted: format(d, 'EEE, MMM d, yyyy'),
+    time: format(d, 'h:mm a'),
+  };
+}
+
+/**
+ * "Set the time portion of this date" — same primitive as on the date
+ * card. We use the existing InlineTimePicker so the look matches.
+ */
+function TimeField({ label, value, onChange, COLORS }) {
+  return (
+    <View>
+      <Text style={[styles.subLabel, { color: COLORS.textMuted }]}>{label}</Text>
+      <InlineTimePicker
+        value={value}
+        onChange={onChange}
+        accent={COLORS.accent}
+        surface={COLORS.surface}
+        surfaceAlt={COLORS.surfaceAlt}
+        border={COLORS.border}
+        text={COLORS.text}
+        textMuted={COLORS.textMuted}
+      />
+    </View>
+  );
+}
+
+/**
+ * Date+time card — used for start, expiry, and the custom one-shot.
+ * Renders the inline date stepper on top, then the time wheels below.
+ */
+function DateTimeCard({ label, icon, iconColor, value, onChange, onClear, COLORS, dismissTime = false }) {
+  const desc = describeDateTime(value);
+  return (
+    <View style={[styles.card, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}>
+      <View style={styles.cardHeader}>
+        <View style={[styles.cardIconWrap, { backgroundColor: (iconColor || COLORS.accent) + '22' }]}>
+          <Ionicons name={icon} size={18} color={iconColor || COLORS.accent} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.cardTitle, { color: COLORS.text }]}>{label}</Text>
+          <Text style={[styles.cardSub, { color: COLORS.textMuted }]}>
+            {desc ? `${desc.formatted} • ${desc.time}` : 'Not set'}
+          </Text>
+        </View>
+        {value && onClear && (
+          <TouchableOpacity onPress={onClear} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="close-circle" size={20} color={COLORS.textMuted} />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {value && (
+        <>
+          <View style={styles.dateWrap}>
+            <InlineDatePicker
+              value={value}
+              onChange={onChange}
+              minDate={new Date()}
+              accent={COLORS.accent}
+              surface={COLORS.surface}
+              surfaceAlt={COLORS.surfaceAlt}
+              border={COLORS.border}
+              text={COLORS.text}
+              textMuted={COLORS.textMuted}
+            />
+          </View>
+          {!dismissTime && (
+            <View style={{ marginTop: 10 }}>
+              <TimeField label="TIME" value={value} onChange={onChange} COLORS={COLORS} />
+            </View>
+          )}
+        </>
+      )}
+
+      {!value && (
+        <TouchableOpacity
+          style={[styles.setBtn, { backgroundColor: COLORS.surface, borderColor: COLORS.border }]}
+          onPress={() => {
+            // Seed with 1 hour from now, rounded to the next 5 minutes.
+            const d = new Date();
+            d.setMinutes(d.getMinutes() + 60 - (d.getMinutes() % 5 === 0 ? 0 : 5 - (d.getMinutes() % 5)));
+            d.setSeconds(0, 0);
+            onChange(d);
+          }}
+        >
+          <Ionicons name="add" size={14} color={COLORS.accent} />
+          <Text style={[styles.setBtnText, { color: COLORS.accent }]}>Set {label.toLowerCase()}</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
 export default function AddTaskScreen() {
-  const { state, addTask, updateTask, addHobby } = useApp();
+  const { state, addTask, updateTask } = useApp();
   const { COLORS } = useTheme();
   const toast = useToast();
   const navigation = useNavigation();
@@ -37,7 +142,6 @@ export default function AddTaskScreen() {
 
   const editingTask = route.params?.task || null;
   const isEditing = !!editingTask;
-  const isHobbyFlow = route.params?.isHobby === true;
 
   const PRIORITY_LEVELS = [
     { label: 'Low',    color: COLORS.success, icon: 'ellipse-outline' },
@@ -51,104 +155,47 @@ export default function AddTaskScreen() {
   const [priority,   setPriority]   = useState(editingTask?.priority || 'Medium');
   const [startDate,  setStartDate]  = useState(editingTask?.startDate  ? new Date(editingTask.startDate)  : null);
   const [expiryDate, setExpiryDate] = useState(editingTask?.expiryDate ? new Date(editingTask.expiryDate) : null);
-  const [reminders,  setReminders]  = useState(editingTask?.reminders || []);
-  const [isHobby,    setIsHobby]    = useState(isHobbyFlow);
 
-  const [activePicker,   setActivePicker]   = useState(null);
-  const [tempDate,       setTempDate]       = useState(new Date());
-  const [pickerStage,    setPickerStage]    = useState('date');
+  // Custom one-shot reminder state.
+  const [customOn,      setCustomOn]      = useState(!!editingTask?.customReminderTime);
+  const [customDate,    setCustomDate]    = useState(() => {
+    if (editingTask?.customReminderTime) return new Date(editingTask.customReminderTime);
+    const d = new Date();
+    d.setHours(d.getHours() + 1, 0, 0, 0);
+    return d;
+  });
 
-  const [reminderModalVisible, setReminderModalVisible] = useState(false);
-  const [reminderNote,         setReminderNote]         = useState('');
-  const [reminderLabel,        setReminderLabel]        = useState('');
-  const [reminderDateTime,     setReminderDateTime]     = useState(new Date());
-  const [showReminderPicker,   setShowReminderPicker]   = useState(false);
-  const [reminderPickerStage,  setReminderPickerStage]  = useState('date');
-  const [editingReminderId,    setEditingReminderId]    = useState(null);
-
-  const openPicker = (target, baseDate) => {
-    setTempDate(baseDate || new Date());
-    setActivePicker(target);
-    setPickerStage('date');
-  };
-
-  const handlePickerChange = (event, selected) => {
-    if (event?.type === 'dismissed') { setActivePicker(null); return; }
-    const d = selected || tempDate;
-    if (activePicker === 'start') setStartDate(d);
-    else if (activePicker === 'expiry') setExpiryDate(d);
-    setActivePicker(null);
-  };
-
-  const openAddReminder = () => {
-    setEditingReminderId(null);
-    setReminderLabel('Custom reminder');
-    setReminderNote('');
-    setReminderDateTime(startDate || expiryDate || new Date());
-    setShowReminderPicker(false);
-    setReminderModalVisible(true);
-  };
-
-  const openEditReminder = (r) => {
-    setEditingReminderId(r.id);
-    setReminderLabel(r.label);
-    setReminderNote(r.note || '');
-    setReminderDateTime(new Date(r.datetime));
-    setShowReminderPicker(false);
-    setReminderModalVisible(true);
-  };
-
-  const applyPreset = (preset) => {
-    if (preset.minutes === null) { setShowReminderPicker(true); return; }
-    const base = startDate || expiryDate || new Date();
-    const dt = addMinutes(base, preset.minutes);
-    if (dt <= new Date()) { Alert.alert('Invalid time', 'That reminder time is in the past.'); return; }
-    setReminderDateTime(dt);
-    setReminderLabel(preset.label);
-    setShowReminderPicker(false);
-  };
-
-  const saveReminder = () => {
-    if (!reminderLabel.trim()) { Alert.alert('Label required', 'Please enter a label for this reminder.'); return; }
-    if (reminderDateTime <= new Date()) { Alert.alert('Invalid time', 'Reminder must be set in the future.'); return; }
-    const entry = {
-      id: editingReminderId || genRId(),
-      label: reminderLabel.trim(),
-      note: reminderNote.trim(),
-      datetime: reminderDateTime.toISOString(),
-    };
-    if (editingReminderId) {
-      setReminders(prev => prev.map(r => r.id === editingReminderId ? entry : r));
-    } else {
-      setReminders(prev => [...prev, entry]);
-    }
-    setReminderModalVisible(false);
-  };
-
-  const deleteReminder = (id) => setReminders(prev => prev.filter(r => r.id !== id));
+  // Before-expiry reminder state. `beforeExpiryMinutes` is a number or null.
+  const [beforeExpiryOn, setBeforeExpiryOn] = useState(() => {
+    const v = editingTask?.beforeExpiryMinutes;
+    return typeof v === 'number' && v > 0;
+  });
+  const [beforeExpiryMinutes, setBeforeExpiryMinutes] = useState(
+    typeof editingTask?.beforeExpiryMinutes === 'number' && editingTask.beforeExpiryMinutes > 0
+      ? editingTask.beforeExpiryMinutes
+      : 30,
+  );
+  const [beforeExpiryCustom, setBeforeExpiryCustom] = useState(
+    typeof editingTask?.beforeExpiryMinutes === 'number' &&
+      editingTask.beforeExpiryMinutes > 0 &&
+      !BEFORE_EXPIRY_PRESETS.some((p) => p.minutes === editingTask.beforeExpiryMinutes)
+      ? editingTask.beforeExpiryMinutes
+      : DEFAULT_CUSTOM_BEFORE_EXPIRY,
+  );
 
   const handleSubmit = () => {
     if (!title.trim()) { Alert.alert('Missing title', 'Please enter a task title.'); return; }
     if (expiryDate && startDate && expiryDate <= startDate) {
       Alert.alert('Invalid dates', 'Expiry must be after start date.'); return;
     }
-
-    if (isHobby) {
-      const hobby = {
-        id: editingTask?.id || genHId(),
-        name: title.trim(),
-        icon: 'leaf-outline',
-        color: COLORS.cat[0],
-        categoryId,
-        completions: {},
-        createdAt: editingTask?.createdAt || new Date().toISOString(),
-      };
-      addHobby(hobby);
-      toast.success('Hobby created');
-      const rootNav = navigation.getParent ? navigation.getParent() : null;
-      if (rootNav && rootNav.navigate) rootNav.navigate('Hobbies');
-      else navigation.navigate('Hobbies');
-      return;
+    if (customOn && isPast(customDate)) {
+      Alert.alert('Invalid time', 'Custom reminder must be in the future.'); return;
+    }
+    if (beforeExpiryOn && !expiryDate) {
+      Alert.alert('Missing expiry', 'Set an expiry date to use a before-expiry reminder.'); return;
+    }
+    if (beforeExpiryOn && expiryDate && addMinutes(expiryDate, -beforeExpiryMinutes) <= new Date()) {
+      Alert.alert('Too soon', 'This expiry is too close for the chosen reminder offset.'); return;
     }
 
     const task = {
@@ -160,7 +207,8 @@ export default function AddTaskScreen() {
       priority,
       startDate:  startDate  ? startDate.toISOString()  : null,
       expiryDate: expiryDate ? expiryDate.toISOString() : null,
-      reminders,
+      customReminderTime: customOn ? customDate.toISOString() : null,
+      beforeExpiryMinutes: beforeExpiryOn ? beforeExpiryMinutes : null,
       status:      editingTask?.status    || 'pending',
       createdAt:   editingTask?.createdAt || new Date().toISOString(),
       completedAt: editingTask?.completedAt || null,
@@ -177,9 +225,6 @@ export default function AddTaskScreen() {
     else navigation.navigate('Tasks', { screen: 'TasksList' });
   };
 
-  const showTaskFields = !isHobby;
-  const showHobbyNote = isHobby && isEditing && editingTask?.createdAt;
-
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: COLORS.bg }]}>
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -193,38 +238,17 @@ export default function AddTaskScreen() {
             <Ionicons name="chevron-back" size={20} color={COLORS.text} />
           </TouchableOpacity>
           <Text style={[styles.title, { color: COLORS.text }]}>
-            {isEditing ? 'Edit task' : (isHobby ? 'New hobby' : 'New task')}
+            {isEditing ? 'Edit task' : 'New task'}
           </Text>
           <View style={{ width: 36 }} />
         </View>
-
-        {/* Hobby toggle (only when not editing) */}
-        {!isEditing && (
-          <View style={[styles.hobbyToggle, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}>
-            <View style={styles.hobbyToggleLeft}>
-              <Ionicons name="leaf-outline" size={22} color={COLORS.accent} />
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.hobbyToggleTitle, { color: COLORS.text }]}>Make this a hobby</Text>
-                <Text style={[styles.hobbyToggleSub, { color: COLORS.textMuted }]}>
-                  Repeat daily — check it off each day.
-                </Text>
-              </View>
-            </View>
-            <Switch
-              value={isHobby}
-              onValueChange={setIsHobby}
-              trackColor={{ false: COLORS.border, true: COLORS.accent + '88' }}
-              thumbColor={isHobby ? COLORS.accent : COLORS.textMuted}
-            />
-          </View>
-        )}
 
         {/* Title */}
         <View style={styles.field}>
           <Text style={[styles.label, { color: COLORS.textMuted }]}>TITLE *</Text>
           <TextInput
             style={[styles.input, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border, color: COLORS.text }]}
-            placeholder={isHobby ? 'e.g. Read, Meditate, Run' : 'What needs to be done?'}
+            placeholder="What needs to be done?"
             placeholderTextColor={COLORS.textMuted}
             value={title}
             onChangeText={setTitle}
@@ -232,218 +256,250 @@ export default function AddTaskScreen() {
           />
         </View>
 
-        {/* Notes — task only */}
-        {showTaskFields && (
-          <View style={styles.field}>
-            <Text style={[styles.label, { color: COLORS.textMuted }]}>NOTES</Text>
-            <TextInput
-              style={[styles.input, styles.textArea, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border, color: COLORS.text }]}
-              placeholder="Add details or description..."
-              placeholderTextColor={COLORS.textMuted}
-              value={notes}
-              onChangeText={setNotes}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-            />
-          </View>
-        )}
-
-        {/* Category */}
+        {/* Notes */}
         <View style={styles.field}>
-          <Text style={[styles.label, { color: COLORS.textMuted }]}>CATEGORY</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={styles.chipRow}>
-              {state.categories.map(cat => (
-                <TouchableOpacity
-                  key={cat.id}
-                  style={[
-                    styles.catChip,
-                    { borderColor: cat.color + '55', backgroundColor: COLORS.surfaceAlt },
-                    categoryId === cat.id && { backgroundColor: cat.color + '22', borderColor: cat.color },
-                  ]}
-                  onPress={() => setCategoryId(cat.id)}
-                >
-                  <Ionicons
-                    name={cat.icon}
-                    size={14}
-                    color={categoryId === cat.id ? cat.color : COLORS.textSub}
-                  />
-                  <Text style={[
-                    styles.catChipText,
-                    { color: COLORS.textSub },
-                    categoryId === cat.id && { color: cat.color },
-                  ]}>
-                    {cat.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </ScrollView>
+          <Text style={[styles.label, { color: COLORS.textMuted }]}>NOTES</Text>
+          <TextInput
+            style={[styles.input, styles.textArea, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border, color: COLORS.text }]}
+            placeholder="Add details or description..."
+            placeholderTextColor={COLORS.textMuted}
+            value={notes}
+            onChangeText={setNotes}
+            multiline
+            numberOfLines={4}
+            textAlignVertical="top"
+          />
         </View>
 
-        {/* Priority — task only */}
-        {showTaskFields && (
-          <View style={styles.field}>
-            <Text style={[styles.label, { color: COLORS.textMuted }]}>PRIORITY</Text>
-            <View style={styles.chipRow}>
-              {PRIORITY_LEVELS.map(p => (
-                <TouchableOpacity
-                  key={p.label}
-                  style={[
-                    styles.priorityChip,
-                    { borderColor: p.color + '55', backgroundColor: COLORS.surfaceAlt },
-                    priority === p.label && { backgroundColor: p.color + '22', borderColor: p.color },
-                  ]}
-                  onPress={() => setPriority(p.label)}
-                >
-                  <Ionicons name={p.icon} size={14} color={priority === p.label ? p.color : COLORS.textSub} />
-                  <Text style={[
-                    styles.catChipText,
-                    { color: COLORS.textSub },
-                    priority === p.label && { color: p.color },
-                  ]}>
-                    {p.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* Dates — task only */}
-        {showTaskFields && (
-          <>
-            <View style={styles.field}>
-              <Text style={[styles.label, { color: COLORS.textMuted }]}>START DATE & TIME</Text>
+        {/* Category — flowing grid (no horizontal scroll). */}
+        <View style={styles.field}>
+          <Text style={[styles.label, { color: COLORS.textMuted }]}>CATEGORY</Text>
+          <View style={styles.chipGrid}>
+            {state.categories.map(cat => (
               <TouchableOpacity
-                style={[styles.datePicker, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}
-                onPress={() => openPicker('start', startDate)}
-              >
-                <Ionicons name="calendar-outline" size={18} color={COLORS.accent} />
-                <Text style={[styles.dateText, { color: startDate ? COLORS.text : COLORS.textMuted }]}>
-                  {startDate ? format(startDate, 'EEE, MMM d yyyy • h:mm a') : 'Set start date (optional)'}
-                </Text>
-                {startDate && (
-                  <TouchableOpacity onPress={() => setStartDate(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    <Ionicons name="close" size={18} color={COLORS.textMuted} />
-                  </TouchableOpacity>
-                )}
-              </TouchableOpacity>
-              {activePicker === 'start' && Platform.OS === 'ios' && (
-                <DateTimePicker value={startDate || new Date()} mode="datetime" display="spinner"
-                  onChange={(e, d) => { if (e?.type !== 'dismissed' && d) setStartDate(d); }} minimumDate={new Date()} />
-              )}
-              {activePicker === 'start' && Platform.OS === 'android' && (
-                <DateTimePicker
-                  value={tempDate || startDate || new Date()}
-                  mode={pickerStage === 'date' ? 'date' : 'time'}
-                  display="default"
-                  onChange={(e, d) => {
-                    if (!e || e.type === 'dismissed') { setActivePicker(null); setPickerStage('date'); return; }
-                    if (pickerStage === 'date') {
-                      const combined = new Date(d.getFullYear(), d.getMonth(), d.getDate(), tempDate.getHours(), tempDate.getMinutes());
-                      setTempDate(combined); setPickerStage('time');
-                    } else {
-                      const final = new Date(tempDate.getFullYear(), tempDate.getMonth(), tempDate.getDate(), d.getHours(), d.getMinutes());
-                      setStartDate(final); setActivePicker(null); setPickerStage('date');
-                    }
-                  }}
-                  minimumDate={new Date()}
-                />
-              )}
-            </View>
-
-            <View style={styles.field}>
-              <Text style={[styles.label, { color: COLORS.textMuted }]}>EXPIRY DATE & TIME</Text>
-              <TouchableOpacity
+                key={cat.id}
                 style={[
-                  styles.datePicker,
-                  { backgroundColor: COLORS.surfaceAlt, borderColor: expiryDate ? COLORS.danger + '55' : COLORS.border },
+                  styles.catChip,
+                  { borderColor: cat.color + '55', backgroundColor: COLORS.surfaceAlt },
+                  categoryId === cat.id && { backgroundColor: cat.color + '22', borderColor: cat.color },
                 ]}
-                onPress={() => openPicker('expiry', expiryDate)}
+                onPress={() => setCategoryId(cat.id)}
               >
-                <Ionicons name="alarm-outline" size={18} color={COLORS.danger} />
-                <Text style={[styles.dateText, { color: expiryDate ? COLORS.text : COLORS.textMuted }]}>
-                  {expiryDate ? format(expiryDate, 'EEE, MMM d yyyy • h:mm a') : 'Set expiry date (optional)'}
-                </Text>
-                {expiryDate && (
-                  <TouchableOpacity onPress={() => setExpiryDate(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    <Ionicons name="close" size={18} color={COLORS.textMuted} />
-                  </TouchableOpacity>
-                )}
-              </TouchableOpacity>
-              {activePicker === 'expiry' && Platform.OS === 'ios' && (
-                <DateTimePicker value={expiryDate || new Date()} mode="datetime" display="spinner"
-                  onChange={(e, d) => { if (e?.type !== 'dismissed' && d) setExpiryDate(d); }} minimumDate={startDate || new Date()} />
-              )}
-              {activePicker === 'expiry' && Platform.OS === 'android' && (
-                <DateTimePicker
-                  value={tempDate || expiryDate || new Date()}
-                  mode={pickerStage === 'date' ? 'date' : 'time'}
-                  display="default"
-                  onChange={(e, d) => {
-                    if (!e || e.type === 'dismissed') { setActivePicker(null); setPickerStage('date'); return; }
-                    if (pickerStage === 'date') {
-                      const combined = new Date(d.getFullYear(), d.getMonth(), d.getDate(), tempDate.getHours(), tempDate.getMinutes());
-                      setTempDate(combined); setPickerStage('time');
-                    } else {
-                      const final = new Date(tempDate.getFullYear(), tempDate.getMonth(), tempDate.getDate(), d.getHours(), d.getMinutes());
-                      setExpiryDate(final); setActivePicker(null); setPickerStage('date');
-                    }
-                  }}
-                  minimumDate={startDate || new Date()}
+                <Ionicons
+                  name={cat.icon}
+                  size={14}
+                  color={categoryId === cat.id ? cat.color : COLORS.textSub}
                 />
-              )}
-            </View>
-          </>
-        )}
-
-        {/* Reminders — task only */}
-        {showTaskFields && (
-          <View style={styles.field}>
-            <View style={styles.sectionHeader}>
-              <Text style={[styles.label, { color: COLORS.textMuted, marginBottom: 0 }]}>CUSTOM REMINDERS</Text>
-              <TouchableOpacity
-                style={[styles.addReminderBtn, { backgroundColor: COLORS.accentDim, borderColor: COLORS.accent + '55' }]}
-                onPress={openAddReminder}
-              >
-                <Ionicons name="add" size={14} color={COLORS.accent} />
-                <Text style={[styles.addReminderBtnText, { color: COLORS.accent }]}>Add</Text>
+                <Text style={[
+                  styles.catChipText,
+                  { color: COLORS.textSub },
+                  categoryId === cat.id && { color: cat.color },
+                ]}>
+                  {cat.name}
+                </Text>
               </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        {/* Priority */}
+        <View style={styles.field}>
+          <Text style={[styles.label, { color: COLORS.textMuted }]}>PRIORITY</Text>
+          <View style={styles.priorityRow}>
+            {PRIORITY_LEVELS.map(p => (
+              <TouchableOpacity
+                key={p.label}
+                style={[
+                  styles.priorityChip,
+                  { borderColor: p.color + '55', backgroundColor: COLORS.surfaceAlt },
+                  priority === p.label && { backgroundColor: p.color + '22', borderColor: p.color },
+                ]}
+                onPress={() => setPriority(p.label)}
+              >
+                <Ionicons name={p.icon} size={14} color={priority === p.label ? p.color : COLORS.textSub} />
+                <Text style={[
+                  styles.catChipText,
+                  { color: COLORS.textSub },
+                  priority === p.label && { color: p.color },
+                ]}>
+                  {p.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        {/* Start date & time */}
+        <View style={styles.field}>
+          <Text style={[styles.label, { color: COLORS.textMuted }]}>START</Text>
+          <DateTimeCard
+            label="Start date & time"
+            icon="calendar-outline"
+            iconColor={COLORS.accent}
+            value={startDate}
+            onChange={setStartDate}
+            onClear={() => setStartDate(null)}
+            COLORS={COLORS}
+          />
+        </View>
+
+        {/* Expiry date & time */}
+        <View style={styles.field}>
+          <Text style={[styles.label, { color: COLORS.textMuted }]}>EXPIRY</Text>
+          <DateTimeCard
+            label="Expiry date & time"
+            icon="alarm-outline"
+            iconColor={COLORS.danger}
+            value={expiryDate}
+            onChange={setExpiryDate}
+            onClear={() => setExpiryDate(null)}
+            COLORS={COLORS}
+          />
+        </View>
+
+        {/* Reminders — two opt-in cards. */}
+        <View style={styles.field}>
+          <Text style={[styles.label, { color: COLORS.textMuted }]}>REMINDERS</Text>
+
+          {/* Custom one-shot reminder */}
+          <View style={[styles.card, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}>
+            <View style={styles.cardHeader}>
+              <View style={[styles.cardIconWrap, { backgroundColor: COLORS.accent + '22' }]}>
+                <Ionicons name="notifications-outline" size={18} color={COLORS.accent} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.cardTitle, { color: COLORS.text }]}>Custom reminder</Text>
+                <Text style={[styles.cardSub, { color: COLORS.textMuted }]}>
+                  {customOn
+                    ? `${format(customDate, 'EEE, MMM d • h:mm a')}${isToday(customDate) ? ' (today)' : ''}`
+                    : 'Off — toggle on for a one-shot at a specific time'}
+                </Text>
+              </View>
+              <Switch
+                value={customOn}
+                onValueChange={setCustomOn}
+                trackColor={{ false: COLORS.border, true: COLORS.accent + '88' }}
+                thumbColor={customOn ? COLORS.accent : COLORS.textMuted}
+              />
             </View>
 
-            {reminders.length === 0 ? (
-              <View style={[styles.emptyReminders, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}>
-                <Text style={[styles.emptyRemindersText, { color: COLORS.textMuted }]}>No custom reminders set</Text>
+            {customOn && (
+              <View style={{ marginTop: 10 }}>
+                <InlineDatePicker
+                  value={customDate}
+                  onChange={setCustomDate}
+                  minDate={new Date()}
+                  accent={COLORS.accent}
+                  surface={COLORS.surface}
+                  surfaceAlt={COLORS.surfaceAlt}
+                  border={COLORS.border}
+                  text={COLORS.text}
+                  textMuted={COLORS.textMuted}
+                />
+                <View style={{ marginTop: 10 }}>
+                  <TimeField label="TIME" value={customDate} onChange={setCustomDate} COLORS={COLORS} />
+                </View>
               </View>
-            ) : (
-              reminders
-                .slice()
-                .sort((a, b) => new Date(a.datetime) - new Date(b.datetime))
-                .map(r => (
-                  <View key={r.id} style={[styles.reminderItem, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.accent + '33' }]}>
-                    <View style={styles.reminderLeft}>
-                      <Text style={[styles.reminderLabel, { color: COLORS.text }]}>{r.label}</Text>
-                      <Text style={[styles.reminderTime, { color: COLORS.accent }]}>{format(new Date(r.datetime), 'EEE MMM d • h:mm a')}</Text>
-                      {r.note ? <Text style={[styles.reminderNote, { color: COLORS.textMuted }]}>{r.note}</Text> : null}
-                    </View>
-                    <View style={styles.reminderActions}>
-                      <TouchableOpacity onPress={() => openEditReminder(r)} style={styles.reminderActionBtn}>
-                        <Ionicons name="create-outline" size={16} color={COLORS.accent} />
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={() => deleteReminder(r.id)} style={styles.reminderActionBtn}>
-                        <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                ))
             )}
           </View>
-        )}
+
+          {/* Before-expiry reminder */}
+          <View style={[styles.card, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border, marginTop: SPACING.sm }]}>
+            <View style={styles.cardHeader}>
+              <View style={[styles.cardIconWrap, { backgroundColor: COLORS.danger + '22' }]}>
+                <Ionicons name="timer-outline" size={18} color={COLORS.danger} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.cardTitle, { color: COLORS.text }]}>Before expiry</Text>
+                <Text style={[styles.cardSub, { color: COLORS.textMuted }]}>
+                  {beforeExpiryOn
+                    ? expiryDate
+                      ? `Notify ${beforeExpiryMinutes} min before expiry`
+                      : 'Set an expiry date to use this'
+                    : 'Off — toggle on to fire before expiry'}
+                </Text>
+              </View>
+              <Switch
+                value={beforeExpiryOn}
+                onValueChange={setBeforeExpiryOn}
+                trackColor={{ false: COLORS.border, true: COLORS.danger + '88' }}
+                thumbColor={beforeExpiryOn ? COLORS.danger : COLORS.textMuted}
+              />
+            </View>
+
+            {beforeExpiryOn && (
+              <View style={{ marginTop: 10 }}>
+                <View style={styles.presetGrid}>
+                  {BEFORE_EXPIRY_PRESETS.map((p) => {
+                    const active = p.minutes === null
+                      ? !BEFORE_EXPIRY_PRESETS.some((q) => q.minutes === beforeExpiryMinutes)
+                      : beforeExpiryMinutes === p.minutes;
+                    return (
+                      <TouchableOpacity
+                        key={p.label}
+                        style={[
+                          styles.presetChip,
+                          { backgroundColor: COLORS.surface, borderColor: COLORS.border },
+                          active && { backgroundColor: COLORS.danger + '22', borderColor: COLORS.danger },
+                        ]}
+                        onPress={() => {
+                          if (p.minutes === null) {
+                            setBeforeExpiryMinutes(beforeExpiryCustom);
+                          } else {
+                            setBeforeExpiryMinutes(p.minutes);
+                          }
+                        }}
+                      >
+                        <Text style={[
+                          styles.presetChipText,
+                          { color: COLORS.textMuted },
+                          active && { color: COLORS.danger },
+                        ]}>
+                          {p.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Custom stepper — visible only when "Custom…" is active. */}
+                {!BEFORE_EXPIRY_PRESETS.some((q) => q.minutes === beforeExpiryMinutes) && (
+                  <View style={[styles.customStepper, { backgroundColor: COLORS.surface, borderColor: COLORS.border }]}>
+                    <TouchableOpacity
+                      style={[styles.stepperBtn, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}
+                      onPress={() => {
+                        const n = Math.max(1, beforeExpiryCustom - 5);
+                        setBeforeExpiryCustom(n);
+                        setBeforeExpiryMinutes(n);
+                      }}
+                    >
+                      <Ionicons name="remove" size={16} color={COLORS.danger} />
+                    </TouchableOpacity>
+                    <View style={styles.stepperMid}>
+                      <Text style={[styles.stepperValue, { color: COLORS.text }]}>
+                        {beforeExpiryCustom}
+                      </Text>
+                      <Text style={[styles.stepperUnit, { color: COLORS.textMuted }]}>minutes</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.stepperBtn, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}
+                      onPress={() => {
+                        const n = Math.min(7 * 24 * 60, beforeExpiryCustom + 5);
+                        setBeforeExpiryCustom(n);
+                        setBeforeExpiryMinutes(n);
+                      }}
+                    >
+                      <Ionicons name="add" size={16} color={COLORS.danger} />
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
+        </View>
 
         {/* Created/Last edited timestamps */}
-        {showHobbyNote && (
+        {isEditing && editingTask?.createdAt && (
           <Text style={[styles.timestamp, { color: COLORS.textMuted }]}>
             Created {relTime(editingTask.createdAt)}
           </Text>
@@ -451,110 +507,14 @@ export default function AddTaskScreen() {
 
         {/* Submit */}
         <PrimaryButton
-          label={isEditing ? 'Save changes' : (isHobby ? 'Create hobby' : 'Create task')}
+          label={isEditing ? 'Save changes' : 'Create task'}
           icon={isEditing ? 'save-outline' : 'checkmark'}
-          color={isHobby ? COLORS.success : COLORS.accent}
+          color={COLORS.accent}
           onPress={handleSubmit}
         />
 
         <View style={{ height: 40 }} />
       </ScrollView>
-
-      {/* Reminder Modal */}
-      <Modal visible={reminderModalVisible} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modal, { backgroundColor: COLORS.surface, borderColor: COLORS.border }]}>
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: COLORS.text }]}>
-                {editingReminderId ? 'Edit reminder' : 'Add reminder'}
-              </Text>
-              <TouchableOpacity onPress={() => setReminderModalVisible(false)}>
-                <Ionicons name="close" size={22} color={COLORS.textMuted} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={[styles.modalLabel, { color: COLORS.textMuted }]}>LABEL</Text>
-            <TextInput
-              style={[styles.input, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border, color: COLORS.text }]}
-              placeholder="e.g. Don't forget!"
-              placeholderTextColor={COLORS.textMuted}
-              value={reminderLabel}
-              onChangeText={setReminderLabel}
-            />
-
-            <Text style={[styles.modalLabel, { color: COLORS.textMuted, marginTop: 12 }]}>NOTE (optional)</Text>
-            <TextInput
-              style={[styles.input, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border, color: COLORS.text }]}
-              placeholder="Add a short note..."
-              placeholderTextColor={COLORS.textMuted}
-              value={reminderNote}
-              onChangeText={setReminderNote}
-            />
-
-            {(startDate || expiryDate) && (
-              <>
-                <Text style={[styles.modalLabel, { color: COLORS.textMuted, marginTop: 14 }]}>QUICK PRESETS</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }}>
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
-                    {REMINDER_PRESETS.map(p => (
-                      <TouchableOpacity
-                        key={p.label}
-                        style={[styles.presetChip, { backgroundColor: COLORS.accentDim, borderColor: COLORS.accent + '44' }]}
-                        onPress={() => applyPreset(p)}
-                      >
-                        <Text style={[styles.presetChipText, { color: COLORS.accentLight }]}>{p.label}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </ScrollView>
-              </>
-            )}
-
-            <Text style={[styles.modalLabel, { color: COLORS.textMuted, marginTop: 14 }]}>REMINDER TIME</Text>
-            <TouchableOpacity
-              style={[styles.datePicker, { marginBottom: 0, backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}
-              onPress={() => {
-                if (Platform.OS === 'android') { setReminderPickerStage('date'); setShowReminderPicker(true); }
-                else setShowReminderPicker(v => !v);
-              }}
-            >
-              <Ionicons name="notifications-outline" size={18} color={COLORS.accent} />
-              <Text style={[styles.dateText, { color: COLORS.text }]}>{format(reminderDateTime, 'EEE, MMM d yyyy • h:mm a')}</Text>
-            </TouchableOpacity>
-
-            {showReminderPicker && Platform.OS === 'ios' && (
-              <DateTimePicker value={reminderDateTime} mode="datetime" display="spinner"
-                onChange={(e, d) => { if (e.type !== 'dismissed' && d) setReminderDateTime(d); }} minimumDate={new Date()} />
-            )}
-            {showReminderPicker && Platform.OS === 'android' && (
-              <DateTimePicker
-                value={reminderDateTime}
-                mode={reminderPickerStage === 'date' ? 'date' : 'time'}
-                display="default"
-                onChange={(e, d) => {
-                  if (!e || e.type === 'dismissed') { setShowReminderPicker(false); setReminderPickerStage('date'); return; }
-                  if (reminderPickerStage === 'date') {
-                    const combined = new Date(d.getFullYear(), d.getMonth(), d.getDate(), reminderDateTime.getHours(), reminderDateTime.getMinutes());
-                    setReminderDateTime(combined); setReminderPickerStage('time');
-                  } else {
-                    const final = new Date(reminderDateTime.getFullYear(), reminderDateTime.getMonth(), reminderDateTime.getDate(), d.getHours(), d.getMinutes());
-                    setReminderDateTime(final); setShowReminderPicker(false); setReminderPickerStage('date');
-                  }
-                }}
-                minimumDate={new Date()}
-              />
-            )}
-
-            <TouchableOpacity
-              style={[styles.submitBtn, { marginTop: 18, backgroundColor: COLORS.accent }]}
-              onPress={saveReminder}
-            >
-              <Ionicons name="save-outline" size={18} color="#fff" />
-              <Text style={styles.submitText}>Save reminder</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -563,64 +523,104 @@ const styles = StyleSheet.create({
   safe:      { flex: 1 },
   container: { flex: 1, paddingHorizontal: SPACING.lg },
 
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: SPACING.lg, marginBottom: SPACING.lg },
-  backBtn: { width: 36, height: 36, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
-  title:   { ...FONTS.heading, fontSize: 22 },
-
-  hobbyToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: SPACING.md,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-    marginBottom: SPACING.lg,
-    gap: SPACING.md,
-  },
-  hobbyToggleLeft: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md, flex: 1 },
-  hobbyToggleTitle: { fontSize: 14, fontWeight: '700' },
-  hobbyToggleSub:   { fontSize: 11, marginTop: 2 },
+  header:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: SPACING.lg, marginBottom: SPACING.lg },
+  backBtn:  { width: 36, height: 36, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  title:    { ...FONTS.heading, fontSize: 22 },
 
   timestamp: { fontSize: 12, marginTop: SPACING.md, fontStyle: 'italic' },
 
-  field: { marginBottom: SPACING.lg },
-  label: { ...FONTS.label, marginBottom: SPACING.sm, fontSize: 11 },
+  field:  { marginBottom: SPACING.lg },
+  label:  { ...FONTS.label, marginBottom: SPACING.sm, fontSize: 11 },
+  subLabel: { ...FONTS.label, fontSize: 10, marginBottom: 6 },
 
   input:    { borderRadius: RADIUS.md, borderWidth: 1, fontSize: 15, paddingHorizontal: 14, paddingVertical: 13 },
   textArea: { minHeight: 90, paddingTop: 12 },
 
-  chipRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  catChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: RADIUS.md, borderWidth: 1, gap: 6 },
+  // Category chips — wrap, no horizontal scroll.
+  chipGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  catChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    gap: 6,
+  },
   catChipText: { fontSize: 13, fontWeight: '600' },
-  priorityChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderRadius: RADIUS.md, borderWidth: 1, flex: 1, justifyContent: 'center', gap: 6 },
 
-  datePicker: { flexDirection: 'row', alignItems: 'center', borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 13, gap: 10 },
-  dateText:   { flex: 1, fontSize: 14 },
+  // Priority — equal-width row.
+  priorityRow: { flexDirection: 'row', gap: 8 },
+  priorityChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    gap: 6,
+  },
 
-  sectionHeader:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  addReminderBtn:    { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1 },
-  addReminderBtnText: { fontWeight: '700', fontSize: 13 },
+  // Generic card (used by DateTimeCard + reminder cards).
+  card: {
+    borderRadius: RADIUS.md,
+    padding: SPACING.md,
+    borderWidth: 1,
+  },
+  cardHeader:  { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
+  cardIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: RADIUS.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardTitle: { fontSize: 15, fontWeight: '700' },
+  cardSub:   { fontSize: 11, marginTop: 2 },
 
-  emptyReminders:     { borderRadius: RADIUS.md, padding: 14, borderWidth: 1, borderStyle: 'dashed', alignItems: 'center' },
-  emptyRemindersText: { fontSize: 13 },
+  dateWrap: { marginTop: 12 },
+  setBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingVertical: 10,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+  },
+  setBtnText: { fontSize: 13, fontWeight: '700' },
 
-  reminderItem:      { flexDirection: 'row', alignItems: 'center', borderRadius: RADIUS.md, padding: 12, marginBottom: 8, borderWidth: 1 },
-  reminderLeft:      { flex: 1 },
-  reminderLabel:     { fontSize: 14, fontWeight: '700' },
-  reminderTime:      { fontSize: 12, marginTop: 2 },
-  reminderNote:      { fontSize: 11, marginTop: 2 },
-  reminderActions:   { flexDirection: 'row', gap: 8 },
-  reminderActionBtn: { padding: 6 },
+  // Before-expiry preset chips.
+  presetGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  presetChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+  },
+  presetChipText: { fontSize: 12, fontWeight: '700' },
 
-  submitBtn:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.lg, paddingVertical: 16, marginTop: 8, gap: 8, ...SHADOW.accent },
-  submitText: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.3 },
-
-  modalOverlay: { flex: 1, backgroundColor: '#000000BB', justifyContent: 'flex-end' },
-  modal: { borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: SPACING.xl, borderWidth: 1, borderBottomWidth: 0, maxHeight: '90%' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
-  modalTitle:  { ...FONTS.heading, fontSize: 20 },
-  modalLabel:  { ...FONTS.label, marginBottom: 8, fontSize: 11 },
-
-  presetChip:     { paddingHorizontal: 12, paddingVertical: 7, borderRadius: RADIUS.pill, borderWidth: 1 },
-  presetChipText: { fontSize: 12, fontWeight: '600' },
+  customStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    padding: 8,
+    gap: 8,
+  },
+  stepperBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperMid: { flex: 1, alignItems: 'center' },
+  stepperValue: { fontSize: 22, fontWeight: '800' },
+  stepperUnit: { fontSize: 10, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', marginTop: 2 },
 });

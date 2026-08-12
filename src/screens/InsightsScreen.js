@@ -118,14 +118,23 @@ export default function InsightsScreen() {
     const end = endOfDay(now);
     const k = todayKey();
 
+    // Denominator = everything the user could realistically complete today:
+//   - Tasks still pending (and not yet expired).
+//   - Tasks the user already finished today.
+// This keeps the "X of Y" rate stable — completing a task increments both
+// numerator AND denominator, so progress reads correctly throughout the day.
     const tasksActiveToday = state.tasks.filter((t) => {
-      if (!t || t.status === 'expired') return false;
-      const created = new Date(t.createdAt);
-      if (created > end) return false;
-      if (t.expiryDate && new Date(t.expiryDate) < start) return false;
-      return true;
+      if (t.status === 'expired') return false;
+      if (t.status === 'pending') {
+        if (t.expiryDate && new Date(t.expiryDate) < start) return false;
+        return true;
+      }
+      if (t.status === 'completed' && t.completedAt) {
+        return isWithinInterval(new Date(t.completedAt), { start, end });
+      }
+      return false;
     });
-    const tasksCompletedToday = tasksActiveToday.filter(
+    const tasksCompletedToday = state.tasks.filter(
       (t) =>
         t.status === 'completed' &&
         t.completedAt &&
@@ -246,7 +255,7 @@ export default function InsightsScreen() {
             <Text style={[styles.rateValue, { color: COLORS.text }]}>{animatedRate}%</Text>
             <Text style={[styles.rateSubtext, { color: COLORS.textSub }]}>
               {todayStats.hasAnyData
-                ? `${todayStats.tasksCompletedToday} of ${todayStats.tasksActiveToday} tasks · ${todayStats.hobbiesDoneToday} of ${todayStats.totalHobbies} hobbies`
+                ? `${todayStats.tasksCompletedToday} of ${todayStats.tasksActiveToday} done today · ${todayStats.hobbiesDoneToday}/${todayStats.totalHobbies} hobbies`
                 : 'Add a task or hobby to start tracking'}
             </Text>
             <View style={styles.streakInfo}>

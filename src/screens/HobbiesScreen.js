@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity,
-  TextInput, Alert, Modal, RefreshControl,
+  View, Text, StyleSheet, FlatList, ScrollView,  TouchableOpacity,
+  TextInput, Alert, Modal, RefreshControl, Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,6 +11,7 @@ import { useToast } from '../context/ToastContext';
 import { useTheme, FONTS, RADIUS, SHADOW, SPACING } from '../utils/theme';
 import { currentStreak, lastNDays, dayKey, dayLabel } from '../utils/hobbyStats';
 import { usePullRefresh } from '../hooks/usePullRefresh';
+import InlineTimePicker from '../components/InlineTimePicker';
 
 const ICONS = [
   'barbell-outline', 'book-outline', 'brush-outline', 'leaf-outline',
@@ -23,7 +24,38 @@ const ICONS = [
 
 const COLOR_OPTIONS_KEY = 'cat';
 
+// Day-of-week letters shown in the reminder row. Order matches JS getDay()
+// (0 = Sunday).
+const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const DAY_LONG   = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
 const genId = () => `hobby_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+// Format a Date as "8:00 PM" / "20:00" — display only; storage is 24-hour.
+function formatTimeHHMM(d) {
+  const h = d.getHours();
+  const m = d.getMinutes();
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
+}
+
+// Render "Daily at 8:00 PM" or "Mon, Wed, Fri at 8:00 PM".
+function formatReminderSummary(date, days) {
+  const time = formatTimeHHMM(date);
+  if (!days || days.length === 0) return `Never — pick at least one day`;
+  if (days.length === 7) return `Daily at ${time}`;
+  return `${days.map((d) => DAY_LONG[d]).join(', ')} at ${time}`;
+}
+
+// Convert stored "HH:mm" back to "8:00 PM" for the list-item chip.
+function formatReminderTime(hhmm) {
+  if (!hhmm) return '';
+  const [h, m] = hhmm.split(':').map((n) => parseInt(n, 10));
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
+}
 
 function HobbiesHeader({ onAdd, COLORS }) {
   return (
@@ -45,6 +77,7 @@ function HobbyListItem({ hobby, onToggle, onPress, COLORS }) {
   const done = !!(hobby.completions && hobby.completions[today]);
   const streak = currentStreak(hobby.completions);
   const days = lastNDays(7);
+  const hasReminder = !!hobby.reminderTime;
 
   return (
     <TouchableOpacity
@@ -75,6 +108,14 @@ function HobbyListItem({ hobby, onToggle, onPress, COLORS }) {
             <Text style={[styles.streakText, { color: COLORS.textMuted }]}>
               {streak} day{streak === 1 ? '' : 's'}
             </Text>
+            {hasReminder && (
+              <View style={styles.reminderChip}>
+                <Ionicons name="notifications" size={10} color={COLORS.accent} />
+                <Text style={[styles.reminderChipText, { color: COLORS.accent }]}>
+                  {formatReminderTime(hobby.reminderTime)}
+                </Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -132,6 +173,14 @@ export default function HobbiesScreen() {
   const [newName, setNewName] = useState('');
   const [selectedIcon, setSelectedIcon] = useState(ICONS[0]);
   const [selectedColor, setSelectedColor] = useState(COLORS[COLOR_OPTIONS_KEY][0]);
+  // Reminder fields — opt-in per hobby.
+  const [reminderOn, setReminderOn]     = useState(false);
+  const [reminderTime, setReminderTime] = useState(() => {
+    const d = new Date();
+    d.setHours(20, 0, 0, 0);
+    return d;
+  });
+  const [reminderDays, setReminderDays] = useState([0, 1, 2, 3, 4, 5, 6]);
 
   const sortedHobbies = useMemo(() => {
     const today = todayKey();
@@ -148,6 +197,8 @@ export default function HobbiesScreen() {
       Alert.alert('Name required', 'Please enter a hobby name.');
       return;
     }
+    const hh = String(reminderTime.getHours()).padStart(2, '0');
+    const mm = String(reminderTime.getMinutes()).padStart(2, '0');
     addHobby({
       id: genId(),
       name: newName.trim(),
@@ -155,10 +206,14 @@ export default function HobbiesScreen() {
       color: selectedColor,
       completions: {},
       createdAt: new Date().toISOString(),
+      reminderTime: reminderOn ? `${hh}:${mm}` : null,
+      reminderDays:  reminderOn ? reminderDays.slice() : null,
     });
     setNewName('');
     setSelectedIcon(ICONS[0]);
     setSelectedColor(COLORS[COLOR_OPTIONS_KEY][0]);
+    setReminderOn(false);
+    setReminderDays([0, 1, 2, 3, 4, 5, 6]);
     setModalVisible(false);
     toast.success('Hobby created');
   };
@@ -219,6 +274,13 @@ export default function HobbiesScreen() {
               </TouchableOpacity>
             </View>
 
+            <ScrollView
+              style={styles.modalScroll}
+              contentContainerStyle={styles.modalScrollContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+
             <Text style={[styles.fieldLabel, { color: COLORS.textMuted }]}>NAME</Text>
             <TextInput
               style={[styles.input, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border, color: COLORS.text }]}
@@ -277,12 +339,83 @@ export default function HobbiesScreen() {
               </Text>
             </View>
 
+            {/* Daily reminder — opt-in toggle, time picker, day-of-week pills. */}
+            <View style={[styles.reminderCard, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}>
+              <View style={styles.reminderHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.reminderTitle, { color: COLORS.text }]}>Daily reminder</Text>
+                  <Text style={[styles.reminderSub, { color: COLORS.textMuted }]}>
+                    {reminderOn
+                      ? formatReminderSummary(reminderTime, reminderDays)
+                      : 'Off — toggle on to get a daily nudge'}
+                  </Text>
+                </View>
+                <Switch
+                  value={reminderOn}
+                  onValueChange={setReminderOn}
+                  trackColor={{ false: COLORS.border, true: COLORS.accent + '88' }}
+                  thumbColor={reminderOn ? COLORS.accent : COLORS.textMuted}
+                />
+              </View>
+
+              {reminderOn && (
+                <>
+                  <Text style={[styles.timePickerLabel, { color: COLORS.textMuted }]}>TIME</Text>
+                  <InlineTimePicker
+                    value={reminderTime}
+                    onChange={setReminderTime}
+                    accent={COLORS.accent}
+                    surface={COLORS.surface}
+                    surfaceAlt={COLORS.surfaceAlt}
+                    border={COLORS.border}
+                    text={COLORS.text}
+                    textMuted={COLORS.textMuted}
+                  />
+
+                  <Text style={[styles.dayPickerLabel, { color: COLORS.textMuted }]}>DAYS</Text>
+                  <View style={styles.dayPickerRow}>
+                    {DAY_LETTERS.map((letter, i) => {
+                      const active = reminderDays.includes(i);
+                      return (
+                        <TouchableOpacity
+                          key={i}
+                          style={[
+                            styles.dayPill,
+                            {
+                              backgroundColor: active ? selectedColor : COLORS.surface,
+                              borderColor: active ? selectedColor : COLORS.border,
+                            },
+                          ]}
+                          onPress={() => {
+                            setReminderDays((prev) =>
+                              prev.includes(i) ? prev.filter((d) => d !== i) : [...prev, i].sort(),
+                            );
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.dayPillText,
+                              { color: active ? '#fff' : COLORS.textMuted },
+                            ]}
+                          >
+                            {letter}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </>
+              )}
+            </View>
+
             <TouchableOpacity
               style={[styles.createBtn, { backgroundColor: selectedColor }]}
               onPress={handleAdd}
             >
               <Text style={styles.createBtnText}>Create hobby</Text>
             </TouchableOpacity>
+
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -318,6 +451,8 @@ const styles = StyleSheet.create({
   struck:       { textDecorationLine: 'line-through' },
   streakRow:    { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   streakText:   { fontSize: 12, fontWeight: '600' },
+  reminderChip:    { flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: 8 },
+  reminderChipText:{ fontSize: 11, fontWeight: '700' },
   tickBtn:      { width: 32, height: 32, borderRadius: 16, borderWidth: 2, justifyContent: 'center', alignItems: 'center' },
 
   weekStrip: { flexDirection: 'row', gap: SPACING.sm, justifyContent: 'space-between' },
@@ -331,9 +466,11 @@ const styles = StyleSheet.create({
   emptyBtnText:{ color: '#fff', fontWeight: '700', fontSize: 14 },
 
   modalOverlay: { flex: 1, backgroundColor: '#000000AA', justifyContent: 'flex-end' },
-  modal:        { borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: SPACING.xl, borderWidth: 1, borderBottomWidth: 0, maxHeight: '90%' },
+  modal:        { borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: SPACING.xl, borderWidth: 1, borderBottomWidth: 0, height: '92%' },
   modalHeader:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   modalTitle:   { ...FONTS.heading, fontSize: 20 },
+  modalScroll:  { flex: 1 },
+  modalScrollContent: { paddingBottom: SPACING.xxl },
 
   fieldLabel: { ...FONTS.label, marginBottom: SPACING.sm, fontSize: 11 },
   input:      { borderRadius: RADIUS.md, borderWidth: 1, fontSize: 15, paddingHorizontal: 14, paddingVertical: 12, marginBottom: SPACING.lg },
@@ -347,6 +484,17 @@ const styles = StyleSheet.create({
 
   preview:     { flexDirection: 'row', alignItems: 'center', borderRadius: RADIUS.md, padding: SPACING.md, borderWidth: 1, gap: SPACING.md, marginBottom: SPACING.lg },
   previewName: { fontSize: 16, fontWeight: '800' },
+
+  // Reminder card
+  reminderCard: { borderRadius: RADIUS.md, padding: SPACING.md, borderWidth: 1, marginBottom: SPACING.lg, gap: SPACING.md },
+  reminderHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: SPACING.md },
+  reminderTitle: { fontSize: 15, fontWeight: '700' },
+  reminderSub:   { fontSize: 11, marginTop: 2 },
+  timePickerLabel: { ...FONTS.label, fontSize: 11 },
+  dayPickerLabel: { ...FONTS.label, fontSize: 11 },
+  dayPickerRow: { flexDirection: 'row', gap: 6, justifyContent: 'space-between' },
+  dayPill: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', borderWidth: 1 },
+  dayPillText: { fontSize: 13, fontWeight: '800' },
 
   createBtn:     { borderRadius: RADIUS.lg, paddingVertical: 14, alignItems: 'center', ...SHADOW.accent },
   createBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },

@@ -38,15 +38,22 @@ export default function HobbyMonthlyChart({ hobby }) {
     },
   ];
 
+  // X-axis ticks: every ~7 days plus the last day of the month so 29/30/31
+  // day months get a marker at the right edge instead of stopping at 28.
   const xLabels = [];
   [1, 7, 14, 21, 28]
     .filter((d) => d <= daysInMonth)
     .forEach((d) => {
       xLabels.push({ x: d, label: String(d) });
     });
+  if (daysInMonth >= 29) {
+    xLabels.push({ x: daysInMonth, label: String(daysInMonth) });
+  }
   if (isCurrentMonth && new Date().getDate() > 28) {
     const todayDay = new Date().getDate();
-    xLabels.push({ x: todayDay, label: String(todayDay), emph: true });
+    if (todayDay !== daysInMonth) {
+      xLabels.push({ x: todayDay, label: String(todayDay), emph: true });
+    }
   }
 
   const todayX = isCurrentMonth ? new Date().getDate() : null;
