@@ -9,14 +9,17 @@ import { useApp, todayKey } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { useTheme, FONTS, RADIUS, SHADOW, SPACING } from '../utils/theme';
 import { currentStreak, longestStreak, lastNDays, dayKey } from '../utils/hobbyStats';
-import { format, getDay, startOfMonth, addMonths, getDaysInMonth } from 'date-fns';
+import {
+  format, startOfMonth, startOfWeek, addDays, isAfter,
+} from 'date-fns';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 const CHART_HEIGHT = 130;
 const CHART_BAR_GAP = 6;
 // Square size for each day-cell in the all-time history grid. Matches the
 // look of the 7-day mini-chart at the top so the two read as one design.
-const MONTH_CELL = 18;
+const CELL = 14;
+const CELL_GAP = 3;
 
 function WeekChart({ hobby, COLORS }) {
   const days = lastNDays(7);
@@ -55,117 +58,147 @@ function WeekChart({ hobby, COLORS }) {
   );
 }
 
-// Day-of-week labels shown in the left column of every month block.
-// Order is Mon-first (Monday = 0) so it lines up with the row indexing.
-const DOW_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+// Vertical day-of-week labels (Mon, Wed, Fri) shown on the left edge of
+// the GitHub-style grid. Only every other row is labeled to keep the
+// gutter compact.
+const DOW_LABELS = ['Mon', '', 'Wed', '', 'Fri', '', ''];
 
-function MonthBlock({ monthDate, hobby, COLORS, today }) {
-  const daysInMonth = getDaysInMonth(monthDate);
-  const firstDow = getDay(monthDate); // 0 = Sun
-  // Convert Sun-first index to Mon-first index so the first row is Monday.
-  const leadingBlanks = (firstDow + 6) % 7;
+// Render the current year of history as a row of weeks (Mon..Sun) like
+// the GitHub contribution graph. The grid starts on the Monday of the
+// week containing Jan 1 of the current year and ends on today's date.
+// Future days in the week containing today are rendered as transparent
+// ghost cells so the rightmost column completes neatly.
+function YearGrid({ hobby, COLORS }) {
+  const today = new Date();
+  // Anchor the grid to the Monday of the week containing Jan 1 of the
+  // current year. Pre-Jan days are transparent placeholders so columns
+  // line up.
+  const startDate = startOfWeek(
+    new Date(today.getFullYear(), 0, 1),
+    { weekStartsOn: 1 },
+  );
+  const endDate = today;
+
+  // Build an array of weeks from startDate..endDate, inclusive.
+  const weeks = [];
+  let cursor = startDate;
+  while (!isAfter(cursor, endDate)) {
+    const week = [];
+    for (let d = 0; d < 7; d++) {
+      week.push(new Date(cursor));
+      cursor = addDays(cursor, 1);
+    }
+    weeks.push(week);
+  }
+  // If the last week doesn't include today, add a trailing week so the
+  // grid can show today's cell always in the rightmost column.
+  if (weeks.length === 0 || weeks[weeks.length - 1][6] < today) {
+    const trailing = [];
+    let t = startOfWeek(addDays(weeks[weeks.length - 1]?.[6] || today, 1), { weekStartsOn: 1 });
+    for (let d = 0; d < 7; d++) {
+      trailing.push(new Date(t));
+      t = addDays(t, 1);
+    }
+    weeks.push(trailing);
+  }
+
+  // For each column, figure out which month label (if any) sits above it.
+  // We place the label wherever the first day of a new month falls.
+  const monthLabels = [];
+  weeks.forEach((week, colIdx) => {
+    const firstDay = week[0];
+    // Only label the column whose Monday is in the first 7 days of a
+    // month — otherwise mid-month labels would appear once and look
+    // like floating words.
+    if (firstDay.getDate() <= 7) {
+      const monthStart = startOfMonth(firstDay);
+      monthLabels.push({
+        colIdx,
+        label: format(monthStart, 'MMM'),
+      });
+    }
+  });
 
   return (
-    <View style={[styles.monthBlock, { borderColor: COLORS.border }]}>
-      <Text style={[styles.monthTitle, { color: COLORS.text }]}>
-        {format(monthDate, 'MMMM yyyy')}
-      </Text>
-
-      {/* Body: 7 weekday rows. Each row has its short label on the left
-          and a horizontally-scrollable strip of cells, one per day. Cells
-          are placed only where (day - 1 + leadingBlanks) % 7 === rowIndex.
-          Each populated cell shows its day number on top so the user can
-          read the date without a separate header row that would scroll
-          out of sync. */}
-      {DOW_LABELS.map((label, rowIdx) => (
-        <View key={label} style={styles.monthRow}>
-          <View style={styles.dowLabelCol}>
-            <Text style={[styles.dowLabel, { color: COLORS.textMuted }]}>{label}</Text>
-          </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.monthCellsScroll}
-          >
-            {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => {
-              const colIdx = d - 1 + leadingBlanks;
-              const belongsHere = colIdx % 7 === rowIdx;
-              const date = new Date(monthDate.getFullYear(), monthDate.getMonth(), d);
-              const k = dayKey(date);
-              const isDone = !!(hobby.completions && hobby.completions[k]);
-              const isFuture = date > today;
-              const isToday = k === todayKey();
+    // Horizontal scroll for the whole graph — GitHub's behaviour on
+    // mobile. The vertical parent ScrollView (screen) provides the
+    // page-level scroll; this inner one lets the user drag the graph
+    // left/right to see earlier/later weeks. The header row and 7 body
+    // rows live inside the same scroller so month labels stay aligned
+    // with their columns as the user scrolls.
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.ghScrollContent}
+    >
+      <View>
+        {/* Month labels row — one absolute slot per week column. */}
+        <View style={styles.ghHeaderRow}>
+          <View style={styles.ghDowGutter} />
+          <View style={styles.ghColumnsArea}>
+            {weeks.map((_, colIdx) => {
+              const lbl = monthLabels.find((m) => m.colIdx === colIdx);
               return (
                 <View
-                  key={d}
-                  style={[
-                    styles.monthCell,
-                    {
-                      width: MONTH_CELL,
-                      height: MONTH_CELL,
-                      backgroundColor: !belongsHere
-                        ? 'transparent'
-                        : isDone
-                          ? hobby.color
-                          : isFuture
-                            ? 'transparent'
-                            : COLORS.border,
-                      borderColor: isToday ? hobby.color : 'transparent',
-                      borderWidth: isToday ? 2 : 0,
-                      // Hide non-matching cells completely so they don't
-                      // waste a slot in the horizontal scroll.
-                      opacity: belongsHere ? 1 : 0,
-                    },
-                  ]}
+                  key={`mh-${colIdx}`}
+                  style={[styles.ghMonthCell, { width: CELL }]}
                 >
-                  {belongsHere && !isFuture && (
-                    <Text style={[styles.monthCellNum, { color: COLORS.textMuted }]}>{d}</Text>
-                  )}
-                  {belongsHere && isFuture && (
-                    <Text style={[styles.monthCellNum, { color: COLORS.textMuted, opacity: 0.4 }]}>{d}</Text>
-                  )}
+                  {lbl ? (
+                    <Text style={[styles.ghMonthLabel, { color: COLORS.textMuted }]}>
+                      {lbl.label}
+                    </Text>
+                  ) : null}
                 </View>
               );
             })}
-          </ScrollView>
+          </View>
         </View>
-      ))}
-    </View>
-  );
-}
 
-function YearGrid({ hobby, COLORS }) {
-  // Oldest month at top → current month at bottom (matches a calendar /
-  // log timeline). Each month is a separate block whose width is dictated
-  // by the number of days in that month.
-  const today = new Date();
-  const createdAt = hobby.createdAt ? new Date(hobby.createdAt) : today;
-  const startMonth = startOfMonth(createdAt);
-  const endMonth = startOfMonth(today);
-
-  const months = [];
-  let cursor = startMonth;
-  while (cursor <= endMonth) {
-    months.push(new Date(cursor));
-    cursor = addMonths(cursor, 1);
-    if (months.length > 240) break; // safety cap — 20 years of history
-  }
-
-  // The screen already wraps this in a vertical ScrollView, so the
-  // month list is just a plain View here. Each month block internally
-  // scrolls horizontally to fit 28-31 day-columns.
-  return (
-    <View>
-      {months.map((m) => (
-        <MonthBlock
-          key={m.toISOString()}
-          monthDate={m}
-          hobby={hobby}
-          COLORS={COLORS}
-          today={today}
-        />
-      ))}
-    </View>
+      {/* Grid body — 7 rows (Mon..Sun) × N week columns. */}
+      <View style={styles.ghBody}>
+        {Array.from({ length: 7 }).map((_, rowIdx) => (
+          <View key={`row-${rowIdx}`} style={styles.ghRow}>
+            <View style={styles.ghDowGutter}>
+              <Text style={[styles.ghDowLabel, { color: COLORS.textMuted }]}>
+                {DOW_LABELS[rowIdx]}
+              </Text>
+            </View>
+            <View style={styles.ghColumnsArea}>
+              {weeks.map((week, colIdx) => {
+                const date = week[rowIdx];
+                const isFuture = isAfter(date, today);
+                // Cells outside the active year still render so the
+                // row spacing is consistent, but as transparent ghosts.
+                const showCell = !isFuture;
+                const k = dayKey(date);
+                const isDone = showCell && !!(hobby.completions && hobby.completions[k]);
+                const isToday = k === todayKey();
+                return (
+                  <View
+                    key={`c-${colIdx}-${rowIdx}`}
+                    style={[
+                      styles.ghCell,
+                      {
+                        width: CELL,
+                        height: CELL,
+                        backgroundColor: !showCell
+                          ? 'transparent'
+                          : isDone
+                            ? hobby.color
+                            : COLORS.border,
+                        borderColor: isToday ? hobby.color : 'transparent',
+                        borderWidth: isToday ? 2 : 0,
+                      },
+                    ]}
+                  />
+                );
+              })}
+            </View>
+          </View>
+        ))}
+      </View>
+      </View>
+    </ScrollView>
   );
 }
 
@@ -369,21 +402,31 @@ const styles = StyleSheet.create({
   chartBar: { width: '80%', borderRadius: 4 },
   chartLabel: { fontSize: 10, fontWeight: '700' },
 
-  // All-time history — one block per month.
-  monthBlock: {
-    borderWidth: 1,
-    borderRadius: RADIUS.md,
-    padding: SPACING.sm,
-    marginBottom: SPACING.md,
-    backgroundColor: 'transparent',
+  // All-time history — GitHub-style contribution graph. The whole grid is
+  // a horizontal list of week columns; rows are days of the week
+  // (Mon..Sun). Months label only the column where the month begins,
+  // matching GitHub. The entire grid scrolls vertically as one block —
+  // individual cells never have their own scroller.
+  ghScrollContent: { paddingRight: SPACING.sm },
+  ghHeaderRow: { flexDirection: 'row', marginBottom: 4 },
+  ghBody:     { flexDirection: 'column' },
+  ghRow:      { flexDirection: 'row' },
+  ghDowGutter: {
+    width: 30,
+    height: CELL + CELL_GAP,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    paddingTop: 0,
   },
-  monthTitle: { ...FONTS.subheading, fontSize: 13, marginBottom: SPACING.sm },
-  monthRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 3 },
-  dowLabelCol: { width: 36, alignItems: 'flex-start', justifyContent: 'center' },
-  dowLabel: { fontSize: 10, fontWeight: '700' },
-  monthCellsScroll: { flexDirection: 'row' },
-  monthCell: { borderRadius: 3, marginRight: 3, alignItems: 'center', justifyContent: 'center' },
-  monthCellNum: { fontSize: 8, fontWeight: '700' },
+  ghDowLabel: { fontSize: 9, fontWeight: '700' },
+  ghColumnsArea: { flexDirection: 'row' },
+  ghMonthCell:  { height: 12, marginRight: CELL_GAP, justifyContent: 'flex-end' },
+  ghMonthLabel: { fontSize: 9, fontWeight: '700' },
+  ghCell: {
+    borderRadius: 2,
+    marginRight: CELL_GAP,
+    marginBottom: CELL_GAP,
+  },
 
   deleteBtn: {
     flexDirection: 'row',

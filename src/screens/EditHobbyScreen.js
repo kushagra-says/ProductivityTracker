@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Switch, Alert,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -187,24 +187,30 @@ export default function EditHobbyScreen() {
           ))}
         </View>
 
-        {/* Daily reminder — opt-in toggle, time picker, day-of-week pills. */}
+        {/* Daily reminder — tap the header to toggle (card-as-button). */}
         <View style={[styles.reminderCard, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}>
-          <View style={styles.reminderHeader}>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => setReminderOn(v => !v)}
+            style={styles.reminderHeader}
+          >
             <View style={{ flex: 1 }}>
               <Text style={[styles.reminderTitle, { color: COLORS.text }]}>Daily reminder</Text>
               <Text style={[styles.reminderSub, { color: COLORS.textMuted }]}>
                 {reminderOn
                   ? formatReminderSummary(reminderTime, reminderDays)
-                  : 'Off — toggle on to get a daily nudge'}
+                  : 'Off — tap to enable a daily nudge'}
               </Text>
             </View>
-            <Switch
-              value={reminderOn}
-              onValueChange={setReminderOn}
-              trackColor={{ false: COLORS.border, true: COLORS.accent + '88' }}
-              thumbColor={reminderOn ? COLORS.accent : COLORS.textMuted}
-            />
-          </View>
+            {reminderOn && (
+              <TouchableOpacity
+                onPress={(e) => { e?.stopPropagation?.(); setReminderOn(false); }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="close-circle" size={20} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            )}
+          </TouchableOpacity>
 
           {reminderOn && (
             <>

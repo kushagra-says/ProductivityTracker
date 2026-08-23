@@ -1,0 +1,549 @@
+# Test Plan
+
+This plan is the pre-commit gate. **No change to any of the bugs listed in `BUGS.md` ships unless every applicable test below is run and reports `PASS`.** A `FAIL` or `PARTIAL` blocks the commit. The plan is intentionally strict, specific, and vast — every area of the app is touched, not only the lines the fix touches.
+
+Each test has:
+
+- **ID** — stable, file-prefixed (e.g. `STREAK-03`).
+- **Pre-conditions** — exact state required to start the test.
+- **Steps** — numbered, deterministic actions.
+- **Expected result** — what `PASS` looks like.
+- **Reporting** — the line to print into the commit notes:
+  `[<id>] <PASS|FAIL|PARTIAL> — <one-sentence reason>`
+
+Tests that cannot be automated (e.g. notification ringer on a real device) are marked **[MANUAL]** and must be checked off by hand before commit.
+
+---
+
+## Reporting format (verbatim, in the commit body)
+
+```
+TESTS
+[STREAK-01]  PASS — task completion today increments streak
+[STREAK-02]  PASS — hobby completion today increments streak
+[STREAK-03]  PASS — no task + no hobby today does not increment
+[STREAK-04]  PASS — streak resets to 1 on a gap day
+[STREAK-05]  PASS — streak continues on consecutive days
+[STREAK-FULL] [MANUAL] — full week simulation
+
+[TASK-01]    PASS — custom mode survives stepper to 60
+[TASK-02]    PASS — explicit preset tap exits custom mode
+[TASK-03]    PASS — saved value is exact
+[TASK-04]    [MANUAL] — validation still blocks past triggers
+[TASK-05]    [MANUAL] — unit chips render d/h/m
+[TASK-06]    [MANUAL] — active unit drives the +/- stepper
+[TASK-07]    [MANUAL] — subtitle reflects d/h/m breakdown
+[TASK-08]    [MANUAL] — preset tap re-seeds the parts
+[TASK-09]    [MANUAL] — before-expiry card hidden when no expiry
+[TASK-10]    [MANUAL] — dynamic cap reflects time-to-expiry
+[TASK-11]    [MANUAL] — shrinking expiry clamps parts
+[TASK-08-helper]  PASS — unitToMinutes(2, days) === 2880
+[TASK-08b-helper] PASS — unitToMinutes(3, hours) === 180
+[TASK-08c-helper] PASS — unitToMinutes(30, minutes) === 30
+[TASK-09-helper]  PASS — minutesToParts(90) splits to 0d 1h 30m
+[TASK-09b-helper] PASS — minutesToParts(2880) splits to 2d 0h 0m
+[TASK-09c-helper] PASS — minutesToParts(0) is all zeros
+[TASK-09d-helper] PASS — minutesToParts(1500) splits to 1d 1h 0m
+[TASK-10-helper]  PASS — clampUnitValue caps hours at 23
+[TASK-10b-helper] PASS — clampUnitValue caps days at 7
+[TASK-10c-helper] PASS — clampUnitValue floors minutes at 0
+[TASK-10d-helper] PASS — clampUnitValue caps minutes at 59
+[TASK-11-helper]  PASS — partsToMinutes composes 1d 2h 3m to 1485
+[TASK-11b-helper] PASS — partsToMinutes({}) === 0
+[TASK-11c-helper] PASS — partsToMinutes clamps to 7-day max
+[TASK-12-helper]  PASS — UNITS exposes canonical d/h/m order
+[TASK-13-helper]  PASS — maxBeforeExpiryMinutes(now+3h) === 180
+[TASK-13b-helper] PASS — past expiry → null
+[TASK-13c-helper] PASS — null expiry → null
+[TASK-13d-helper] PASS — tight expiry floors to 1 min
+[TASK-14-helper]  PASS — partsWithinMax(180) → 0d 3h 0m
+[TASK-14b-helper] PASS — partsWithinMax(1500) → 1d 1h 0m
+[TASK-14c-helper] PASS — partsWithinMax(90) → 0d 1h 30m
+[TASK-14d-helper] PASS — partsWithinMax(0) → all zeros
+[TASK-15-helper]  PASS — maxForUnit respects chosen parts
+[TASK-15b-helper] PASS — maxForUnit hard-caps minutes at 59
+[TASK-15c-helper] PASS — maxForUnit floors days at 0 below 1440
+[TASK-15d-helper] PASS — maxForUnit hard-caps hours at 23
+
+[CAL-01]    PASS — WEEKDAY_LABELS is Mon-first
+[CAL-02]    PASS — MONTH_SHORT is the canonical 12
+[CAL-03]    PASS — matrix has 6 rows
+[CAL-03b]   PASS — Aug 2026 first row in-month days: 1, 2
+[CAL-03c]   PASS — Aug 2026 ends on day 31
+[CAL-03d]   PASS — Aug 31 2026 is a Monday
+[CAL-04]    PASS — matrix has 42 cells
+[CAL-04b]   PASS — every row has 7 cells
+[CAL-05]    PASS — August has 31 in-month cells
+[CAL-05b]   PASS — Aug 2026 has 11 padding cells
+[CAL-06]    PASS — Feb 2026 has 28 days
+[CAL-07]    PASS — Mar 2026 first row in-month day: 1
+[CAL-08]    PASS — yesterday is disabled
+[CAL-08b]   PASS — today (any time) is enabled
+[CAL-08c]   PASS — tomorrow is enabled
+[CAL-09]    PASS — Aug 29 <= max
+[CAL-09b]   PASS — Aug 30 == max (any time)
+[CAL-09c]   PASS — Aug 31 > max
+[CAL-10]    PASS — before min
+[CAL-10b]   PASS — inside range
+[CAL-10c]   PASS — after max
+[CAL-11]    PASS — null cell is disabled
+[CAL-12]    PASS — composeDateWithTime merges date + time
+[CAL-13]    PASS — null inputs → valid Date
+[CAL-14]    PASS — isSameLocalDay ignores time-of-day
+[CAL-15]    PASS — matrix carries today
+[CAL-16]    PASS — Dec 2026 boundary in-month days
+
+[CAL-LIVE-01] [MANUAL] — calendar renders 6×7 grid
+[CAL-LIVE-02] [MANUAL] — tap a day updates the date
+[CAL-LIVE-03] [MANUAL] — chevrons change month
+[CAL-LIVE-04] [MANUAL] — past days are disabled
+[CAL-LIVE-05] [MANUAL] — custom reminder caps at expiry
+[CAL-LIVE-06] [MANUAL] — expiry has no upper cap
+
+[CR-01]     PASS — new task has no startDate
+[CR-02]     [MANUAL] — startDate UI is gone
+[CR-03]     [MANUAL] — saved task has no startDate
+[CR-04]     [MANUAL] — no "starts in 30 min" notification
+
+[CARD-01]   [MANUAL] — date card expands on body tap
+[CARD-02]   [MANUAL] — × clear does not bubble to card tap
+[CARD-03]   [MANUAL] — reminder card toggles on body tap
+[CARD-04]   [MANUAL] — reminder card toggles off on body tap
+[CARD-05]   [MANUAL] — reminder × does not bubble
+[CARD-06]   [MANUAL] — before-expiry toggles on body tap when expiry set
+[CARD-07]   [MANUAL] — hobby reminder toggles on body tap
+[CARD-08]   [MANUAL] — hobby reminder toggles off on body tap
+[CARD-09]   [MANUAL] — hobby reminder × does not bubble
+
+[TIME-01]   PASS — hours scroll 1..12
+[TIME-02]   PASS — minutes scroll 0..59
+[TIME-03]   PASS — AM/PM toggle unaffected
+
+[GRID-01]   PASS — no future cells rendered
+[GRID-02]   PASS — month label anchored to 1st-of-month column
+[GRID-03]   PASS — day-of-week gutter matches Mon..Sun
+[GRID-04]   PASS — week column count is correct for elapsed weeks
+
+[MID-01]    PASS — recompute fires within 1s of local midnight
+[MID-02]    PASS — "Today's hobbies" flips at midnight
+
+[NOTIF-01]  PASS — channel importance MAX
+[NOTIF-02]  PASS — handler shouldPlaySound true
+[NOTIF-03]  [MANUAL] — sound + vibration on real device
+
+[SWIPE-01]  PASS — horizontal swipe changes tab
+[SWIPE-02]  PASS — vertical scroll does not change tab
+[SWIPE-03]  PASS — short swipe is ignored
+[SWIPE-04]  PASS — swipe disabled in stack screens
+
+[THEME-01]  PASS — dark/cream toggle persists
+[THEME-02]  PASS — accent picker persists per theme
+
+[PERSIST-01] PASS — kill + relaunch restores state
+[PERSIST-02] PASS — corrupted JSON recovers to defaults
+
+[NAV-01]    PASS — tab order matches bar order
+[NAV-02]    PASS — settings opens from header
+[CAT-01]    PASS — add/edit/delete category works
+[TASK-A01]  PASS — create task with all fields
+[TASK-A02]  PASS — edit task preserves id
+[TASK-A03]  PASS — delete task cancels notifications
+[HOBBY-A01] PASS — create hobby with reminder
+[HOBBY-A02] PASS — toggle hobby for past date
+[HOBBY-A03] PASS — delete hobby cancels notifications
+[INS-01]    PASS — range filter changes charts
+```
+
+A `PARTIAL` is only acceptable when a single sub-step of a multi-step test is blocked by an unrelated environment issue; the commit must include a written justification.
+
+---
+
+## A. Streak logic (Bug 1) — Completed
+
+The streak is incremented when **either** a task is completed today **or** at least one hobby is marked today, and is reset to 0 on a day with neither. `lastActiveDate` is recomputed every tick and on app foreground.
+
+Covered by: `tests/run-streak-tests.mjs` (18 PASS), plus the manual smoke below.
+
+### STREAK-01 — Task completion today increments the streak
+- **Pre-conditions:** Cold install; `streak = 0`; no hobbies; one pending task.
+- **Steps:** Complete the task via the dashboard checkbox.
+- **Expected:** Dashboard header `state.streak` is `1`; `state.lastActiveDate` is today's `YYYY-MM-DD`.
+
+### STREAK-02 — Hobby completion today increments the streak
+- **Pre-conditions:** Cold install; `streak = 0`; no tasks; one hobby.
+- **Steps:** Toggle the hobby checkbox for today on the dashboard hobby row.
+- **Expected:** Dashboard header `state.streak` is `1`; `state.lastActiveDate` is today.
+
+### STREAK-03 — Day with neither a task nor a hobby does not change the streak
+- **Pre-conditions:** `streak = 5`; `lastActiveDate = yesterday`; no tasks completed today; no hobbies marked today.
+- **Steps:** Open the app; trigger `recomputeStreak` (background → foreground).
+- **Expected:** `streak` remains `5`.
+
+### STREAK-04 — A gap day followed by activity resets the streak to 1
+- **Pre-conditions:** `streak = 5`; `lastActiveDate = 3 days ago`.
+- **Steps:** Complete a task today.
+- **Expected:** `streak = 1`; `lastActiveDate = today`.
+
+### STREAK-05 — Consecutive days keep incrementing
+- **Pre-conditions:** `streak = 5`; `lastActiveDate = yesterday`.
+- **Steps:** Complete a hobby today.
+- **Expected:** `streak = 6`; `lastActiveDate = today`.
+
+### STREAK-FULL — Full week simulation **[MANUAL]**
+- **Pre-conditions:** Fresh state.
+- **Steps:** For seven consecutive days, mark at least one hobby (or complete one task) per day. Record `streak` at the end of each day.
+- **Expected:** `streak` ends at `7`; the dashboard header shows `7` from the start of day 8 onwards.
+
+---
+
+## B. Task add/edit — before-expiry (Bug 2) — Completed
+
+The `beforeExpiryCustomMode` flag keeps the user in "Custom…" mode even when the picked minutes happen to coincide with a preset. The d/h/m unit picker splits the offset into days + hours + minutes; total minutes is recomputed via `partsToMinutes` whenever the user is in custom mode.
+
+Covered by: `tests/run-before-expiry-tests.mjs` (42 PASS — `TASK-01`..`TASK-07` for the active-chip semantics, `TASK-08-helper`..`TASK-15d-helper` for the helpers), plus the manual smoke below.
+
+### TASK-01 — Custom mode survives stepper to 60
+- **Pre-conditions:** New task screen open; Before-expiry toggle on.
+- **Steps:** Tap `Custom…`. Use the d/h/m stepper to drive the total to `60` (e.g. `hours=1, days=0, minutes=0`).
+- **Expected:** `Custom…` chip remains highlighted. The custom stepper remains visible. `1 hour` chip is not highlighted.
+
+### TASK-02 — Explicit preset tap exits custom mode
+- **Pre-conditions:** State from TASK-01.
+- **Steps:** Tap `1 hour` chip.
+- **Expected:** `1 hour` chip is highlighted. `Custom…` chip is not. The custom stepper is hidden. `beforeExpiryMinutes === 60`.
+
+### TASK-03 — Saved value is exact
+- **Pre-conditions:** Custom stepper at `47`.
+- **Steps:** Save the task; reopen it for edit.
+- **Expected:** `beforeExpiryMinutes === 47`; the `Custom…` chip is highlighted on reopen.
+
+### TASK-04 — Validation still blocks past triggers **[MANUAL]**
+- **Pre-conditions:** Expiry = now + 30 minutes. Custom at 60.
+- **Steps:** Tap Save.
+- **Expected:** Alert "Too soon — this expiry is too close for the chosen reminder offset." Task is not saved.
+
+### TASK-05 — Unit chips render d/h/m **[MANUAL]**
+- **Pre-conditions:** Before-expiry toggle on. `Custom…` active.
+- **Steps:** Inspect the custom stepper.
+- **Expected:** Three chips labelled `days`, `hours`, `minutes` are visible. Exactly one is highlighted in `COLORS.danger`.
+
+### TASK-06 — Active unit drives the +/- stepper **[MANUAL]**
+- **Pre-conditions:** State from TASK-05.
+- **Steps:** Tap `hours`. Tap `+` four times. Tap `days`. Tap `−` once. Tap `minutes`. Tap `+` twice.
+- **Expected:** Hours chip active → value changes; days chip active → days value changes; minutes chip active → minutes changes by 5 per tap. Days never exceeds 7, hours never exceeds 23, minutes never exceeds 59. Below 0 clamps to the floor.
+
+### TASK-07 — Card subtitle reflects d/h/m breakdown **[MANUAL]**
+- **Pre-conditions:** Days=2, Hours=3, Minutes=15, expiry date set.
+- **Steps:** Look at the card subtitle.
+- **Expected:** Subtitle reads `Notify 2 days 3 hours 15 min (8775 min) before expiry`. The `(8775 min)` is the total the app will use for `addMinutes(expiryDate, -beforeExpiryMinutes)`.
+
+### TASK-08 — Preset tap re-seeds the parts **[MANUAL]**
+- **Pre-conditions:** Custom mode active, current parts d/h/m = 2/3/15.
+- **Steps:** Tap the `1 hour` preset.
+- **Expected:** `1 hour` chip becomes active, `Custom…` is not. Tap `Custom…` again — d/h/m now show 0/1/0, not the previous 2/3/15. Total minutes is 60.
+
+### TASK-09 — Before-expiry card hidden when no expiry **[MANUAL]**
+- **Pre-conditions:** New task screen, expiry date not set.
+- **Steps:** Inspect the reminders section.
+- **Expected:** The "Before expiry" card is not visible at all — no header, no toggle, no chip. The "Custom reminder" card is still shown.
+
+### TASK-10 — Dynamic cap reflects time-to-expiry **[MANUAL]**
+- **Pre-conditions:** Expiry set to now + 3 hours.
+- **Steps:** Toggle before-expiry on, tap `Custom…`. Inspect the unit chips and stepper labels.
+- **Expected:** Card subtitle includes "max 180 min". Tapping the `days` chip, then pressing `+` repeatedly — value caps at 0 (since 3 h < 1 day). Tapping the `hours` chip, pressing `+` three times — hours becomes 3 (180 min), then stops.
+
+### TASK-11 — Shrinking expiry clamps parts **[MANUAL]**
+- **Pre-conditions:** Expiry = now + 2 days, custom parts = 1 day 5 hours (total 1740 min).
+- **Steps:** Change expiry to now + 3 hours (e.g. via the date picker).
+- **Expected:** Without you touching the chips, d/h/m snap down to 0/3/0 (180 min). The "+" buttons stop at this cap. The card subtitle now reads "max 180 min".
+
+### TASK-13..15d — Pure-helper gates (run-before-expiry-tests.mjs)
+See `tests/run-before-expiry-tests.mjs` for the full assertion list. Every case must report `PASS`.
+
+---
+
+## C. Time picker — scrollable wheel (Bug 6)
+
+### TIME-01 — Hours scroll 1..12
+- **Pre-conditions:** Any time picker (hobby reminder, task custom reminder).
+- **Steps:** Scroll the hour column up and down past 1 and past 12.
+- **Expected:** Visible value cycles 1 → 2 → … → 12 → 1. No value outside 1..12 is reachable.
+
+### TIME-02 — Minutes scroll 0..59
+- **Steps:** Scroll the minute column up and down past 0 and past 59.
+- **Expected:** Visible value cycles 0 → 1 → … → 59 → 0. No value outside 0..59 is reachable.
+
+### TIME-03 — AM/PM toggle unaffected
+- **Steps:** With time `3:00 AM`, tap PM.
+- **Expected:** Displayed value becomes `3:00 PM`. The underlying 24-hour `value.getHours()` is `15`.
+
+---
+
+## D. Hobby history grid (Bug 3)
+
+### GRID-01 — No future cells rendered
+- **Pre-conditions:** Today is `2026-08-23`.
+- **Steps:** Open any hobby's detail screen.
+- **Expected:** The grid contains exactly the cells for the year up to and including today. There are no cells after today in any row.
+
+### GRID-02 — Month label anchored to 1st-of-month column
+- **Pre-conditions:** Today is in August.
+- **Steps:** Visually trace the `Aug` label.
+- **Expected:** `Aug` label sits directly above the column that contains `Aug 1`.
+
+### GRID-03 — Day-of-week gutter matches Mon..Sun
+- **Steps:** Compare each row index (`0..6`) against the day-of-week of the date in that row.
+- **Expected:** Row 0 = Mon, row 1 = Tue, … row 6 = Sun. Gutter text matches.
+
+### GRID-04 — Week column count is correct for elapsed weeks
+- **Pre-conditions:** Today is `2026-08-23`.
+- **Steps:** Count the columns in the grid.
+- **Expected:** Number of columns matches `ceil(((today − monday-of-week-of-jan-1) + 1) / 7)`.
+
+---
+
+## E. Midnight rollover (Bug 4)
+
+### MID-01 — Recompute fires within 1 s of local midnight
+- **Pre-conditions:** App open at `23:59:30`.
+- **Steps:** Watch the system clock cross `00:00:00`.
+- **Expected:** `recomputeStreak` is called within 1 s; `state.streak` is updated atomically.
+
+### MID-02 — "Today's hobbies" flips at midnight
+- **Pre-conditions:** App open at `23:59:30`; all hobbies are marked today.
+- **Steps:** Watch the system clock cross `00:00:00`.
+- **Expected:** Within 1 s, the dashboard hobby rows un-check and show the "Mark today" empty state.
+
+---
+
+## F. Notifications (Bug 5)
+
+### NOTIF-01 — Channel importance MAX
+- **Pre-conditions:** Cold launch on Android.
+- **Steps:** `adb shell dumpsys notification` and locate the channel id `default`.
+- **Expected:** Importance = `MAX` (5). `enable_vibration = true`. `vibration_pattern` is non-empty. `sound = default`.
+
+### NOTIF-02 — Handler shouldPlaySound true
+- **Steps:** Read the source of `AppContext.js` and confirm `Notifications.setNotificationHandler({ handleNotification })` returns `shouldPlaySound: true`.
+- **Expected:** Present and true.
+
+### NOTIF-03 — Sound + vibration on real device **[MANUAL]**
+- **Pre-conditions:** A real Android device.
+- **Steps:** Schedule a notification for now + 30 s. Wait.
+- **Expected:** Device rings/vibrates. Notification appears in tray.
+
+---
+
+## G. Swipe between tabs (Bug 7)
+
+### SWIPE-01 — Horizontal swipe changes tab
+- **Pre-conditions:** Dashboard tab is active.
+- **Steps:** Swipe left across ≥ 60% of the screen width with < 40 px of vertical drift.
+- **Expected:** Tasks tab becomes active.
+
+### SWIPE-02 — Vertical scroll does not change tab
+- **Pre-conditions:** Dashboard tab is active with a long scrollable list.
+- **Steps:** Scroll the list down by 300 px; the finger never moves more than 30 px horizontally.
+- **Expected:** Tab does not change.
+
+### SWIPE-03 — Short swipe is ignored
+- **Steps:** Swipe left across 20% of the screen width.
+- **Expected:** Tab does not change.
+
+### SWIPE-04 — Swipe disabled in stack screens
+- **Pre-conditions:** On AddTask (a stack screen inside the Tasks tab).
+- **Steps:** Swipe left across 80% of the screen width.
+- **Expected:** Tab does not change.
+
+---
+
+## H. Theming, persistence, navigation (sanity coverage for every area)
+
+### THEME-01 — Dark/cream toggle persists
+- **Steps:** Switch to cream, kill the app, relaunch.
+- **Expected:** App opens in cream.
+
+### THEME-02 — Accent picker persists per theme
+- **Steps:** In dark, pick `teal`. In cream, pick `brown`. Kill, relaunch. Toggle theme.
+- **Expected:** Dark opens with teal accent; cream opens with brown accent.
+
+### PERSIST-01 — Kill + relaunch restores state
+- **Steps:** Add 3 tasks, 2 hobbies, mark hobbies for 2 days, switch theme, change accent.
+- **Steps:** `adb shell am force-stop` the app, relaunch.
+- **Expected:** All of the above are still present.
+
+### PERSIST-02 — Corrupted JSON recovers to defaults **[MANUAL]**
+- **Steps:** Write garbage to the `@pt_state` key. Relaunch.
+- **Expected:** App opens with default state, no crash.
+
+### NAV-01 — Tab order matches bar order
+- **Steps:** Read `App.js` MainTabs.
+- **Expected:** Order is `Dashboard, Tasks, Categories, Hobbies, Insights`.
+
+### NAV-02 — Settings opens from header
+- **Steps:** On the dashboard, tap the gear icon.
+- **Expected:** `Settings` screen opens (the RootStack, not a tab).
+
+### CAT-01 — Add / edit / delete category
+- **Steps:** Create a category. Edit its color. Delete it.
+- **Expected:** All three flows work; changes persist; no dangling `categoryId`.
+
+### TASK-A01 — Create task with all fields
+- **Steps:** Fill title, notes, category, priority, expiry, custom reminder, before-expiry. Save.
+- **Expected:** Task appears in the list with all fields populated. No `startDate` field exists on the task.
+
+### TASK-A02 — Edit task preserves id
+- **Steps:** Open the task above, change the title, save.
+- **Expected:** The id is unchanged.
+
+### TASK-A03 — Delete task cancels notifications
+- **Steps:** With the task above pending, delete it. Inspect `getAllScheduledNotificationsAsync`.
+- **Expected:** No notifications with `data.taskId === <deleted-id>` remain.
+
+### HOBBY-A01 — Create hobby with reminder
+- **Steps:** Add a hobby. Toggle on a daily reminder for `08:00`. Save.
+- **Expected:** Hobby appears on the list. `reminderTime === "08:00"`. 7 notifications scheduled (one per weekday).
+
+### HOBBY-A02 — Toggle hobby for past date
+- **Steps:** Dispatch `toggleHobbyToday(hobbyId, '2026-08-01')`.
+- **Expected:** `completions['2026-08-01']` is `true`.
+
+### HOBBY-A03 — Delete hobby cancels notifications
+- **Steps:** Delete the hobby from HOBBY-A01.
+- **Expected:** No notifications with `data.hobbyId === <deleted-id>` remain.
+
+### INS-01 — Range filter changes charts
+- **Steps:** On Insights, switch between `All time`, `30 days`, `7 days`.
+- **Expected:** Bar/line charts visibly change. Range label updates.
+
+---
+
+## I. Card-as-button UX (Bug 9 + hobby reminder)
+
+The Start/Expiry date cards and the two reminder cards (Custom reminder, Before expiry) on `AddTaskScreen`, plus the Daily reminder card on `EditHobbyScreen`, all use the same pattern: tap the header to expand/collapse or toggle; `×` inside the header clears without bubbling. The card body is a plain `<View>` (not a `TouchableOpacity`) so nested touchables work.
+
+### CARD-01 — Date card expands on body tap **[MANUAL]**
+- **Pre-conditions:** New task screen, no expiry date set.
+- **Steps:** Tap the Expiry card header.
+- **Expected:** The inline month-grid calendar + TIME field appear. No "Set expiry" button is visible.
+
+### CARD-02 — `×` clear does not bubble to card tap **[MANUAL]**
+- **Pre-conditions:** Expiry date set.
+- **Steps:** Tap the `×` in the expiry card header.
+- **Expected:** The date clears. The calendar collapses. Subtitle reads "Not set — tap to add".
+
+### CARD-03 — Reminder card toggles on body tap **[MANUAL]**
+- **Pre-conditions:** New task, Custom reminder currently off.
+- **Steps:** Tap the Custom reminder card header.
+- **Expected:** The month-grid calendar + time wheel appear. No slider switch is rendered. The `×` is now present in the header.
+
+### CARD-04 — Reminder card toggles off on body tap **[MANUAL]**
+- **Pre-conditions:** Custom reminder is on (from CARD-03).
+- **Steps:** Tap the Custom reminder card header again, away from the `×`.
+- **Expected:** The calendar + time wheel collapse. The subtitle reads `Tap to enable — one-shot at a specific time`. The `×` disappears.
+
+### CARD-05 — Reminder `×` does not bubble **[MANUAL]**
+- **Pre-conditions:** Before expiry reminder on.
+- **Steps:** Tap the `×` in the Before expiry card header.
+- **Expected:** The reminder turns off. The d/h/m picker collapses. The subtitle reads `Tap to enable — fires before the task expires`.
+
+### CARD-06 — Same for Before expiry when expiry present **[MANUAL]**
+- **Pre-conditions:** Expiry date set.
+- **Steps:** Tap the Before expiry card header.
+- **Expected:** The unit chips + stepper + summary appear. No slider switch is rendered.
+
+### CARD-07 — Hobby reminder toggles on body tap **[MANUAL]**
+- **Pre-conditions:** Edit Hobby screen, Daily reminder currently off.
+- **Steps:** Tap the Daily reminder card header.
+- **Expected:** The time picker + day pills appear. No `Switch` slider is rendered.
+
+### CARD-08 — Hobby reminder toggles off on body tap **[MANUAL]**
+- **Pre-conditions:** Daily reminder on.
+- **Steps:** Tap the Daily reminder card header again.
+- **Expected:** The time picker + day pills collapse. The `×` disappears.
+
+### CARD-09 — Hobby reminder `×` does not bubble **[MANUAL]**
+- **Pre-conditions:** Daily reminder on.
+- **Steps:** Tap the `×` in the Daily reminder card header.
+- **Expected:** The reminder turns off. The body collapses.
+
+---
+
+## J. Inline month-grid calendar (Bug — calendar UX)
+
+Replaces the old pill + Today / +1wk / -1wk picker. Used by both the Expiry card and the Custom reminder card. Mon-first, 7 columns × 6 rows, with prev/next-month chevrons. Disabled cells render greyed-out and are non-interactive.
+
+Covered by: `tests/run-calendar-tests.mjs` (35 PASS), plus the manual smoke below.
+
+### CAL-01..16 — Pure-helper gates (run-calendar-tests.mjs)
+See `tests/run-calendar-tests.mjs` for the full assertion list. Every case must report `PASS`.
+
+### CAL-LIVE-01 — Calendar renders a 6×7 grid **[MANUAL]**
+- **Pre-conditions:** Expiry set, body expanded.
+- **Steps:** Inspect the expiry card body.
+- **Expected:** A 6-row × 7-column grid is visible with a `Mon Tue Wed Thu Fri Sat Sun` gutter. Today's cell has a thin accent border. The selected day is filled with `COLORS.accent`.
+
+### CAL-LIVE-02 — Tap a day updates the date **[MANUAL]**
+- **Pre-conditions:** State from CAL-LIVE-01.
+- **Steps:** Tap a different in-month day.
+- **Expected:** The selected cell moves to the tapped day. The card subtitle (`EEE, MMM d, yyyy • h:mm a`) updates to that date.
+
+### CAL-LIVE-03 — Chevrons change month **[MANUAL]**
+- **Steps:** Tap the right chevron twice.
+- **Expected:** Header text cycles `Aug 2026` → `Sep 2026` → `Oct 2026`. The grid redraws for each new month.
+
+### CAL-LIVE-04 — Past days are disabled **[MANUAL]**
+- **Steps:** Navigate back to the current month.
+- **Expected:** Days before today (and greyed-out padding cells) are visibly faded and do not respond to taps. Tapping a past day does not change the selection.
+
+### CAL-LIVE-05 — Custom reminder caps at expiry **[MANUAL]**
+- **Pre-conditions:** Expiry = Aug 30. Custom reminder toggle on.
+- **Steps:** In the custom-reminder calendar, attempt to tap Aug 31.
+- **Expected:** Aug 31 is greyed out and non-interactive. Tapping Aug 30 succeeds. The card subtitle reads without the `· after expiry!` warning.
+
+### CAL-LIVE-06 — Expiry has no upper cap **[MANUAL]**
+- **Pre-conditions:** Custom reminder on (no expiry).
+- **Steps:** Navigate forward 6 months in the custom-reminder calendar.
+- **Expected:** Every month renders normally; no days are disabled beyond the past-day rule.
+
+---
+
+## M. startDate removal (this fix)
+
+The "task starts when it is created" simplification. There is no Start date field, no Start card, no "Task starting soon — starts in 30 min" notification, and `task.startDate` is never written or read anywhere.
+
+Covered by: source-level grep + smoke below.
+
+### CR-01 — New task has no startDate
+- **Steps:** Grep the codebase for `startDate`. Exclude hobby-history week math (`HobbyDetailScreen.startDate` is an unrelated local variable).
+- **Expected:** No matches in `AppContext.js`, `AddTaskScreen.js`, or any task-related module.
+
+### CR-02 — Start date UI is gone **[MANUAL]**
+- **Pre-conditions:** New task screen open.
+- **Steps:** Inspect the form.
+- **Expected:** There is no `START` label, no Start date card. Only TITLE, NOTES, CATEGORY, PRIORITY, EXPIRY, and REMINDERS sections are visible.
+
+### CR-03 — Saved task has no startDate **[MANUAL]**
+- **Pre-conditions:** New task created.
+- **Steps:** Inspect the resulting object in `state.tasks` (e.g. via dev tools or a temporary log).
+- **Expected:** `startDate` is not a property on the saved object. Only `expiryDate`, `customReminderTime`, `beforeExpiryMinutes` exist among the date-related fields.
+
+### CR-04 — No "starts in 30 min" notification **[MANUAL]**
+- **Pre-conditions:** A task created with no expiry and no reminders.
+- **Steps:** Inspect `getAllScheduledNotificationsAsync()`.
+- **Expected:** No notification with title `Task starting soon` is present. (Default 1-hour-before-expiry and custom reminders still fire when configured.)
+
+---
+
+## Z. Pre-commit gate (run order)
+
+1. Run the automated suites in this order:
+   ```
+   node tests/run-streak-tests.mjs
+   node tests/run-before-expiry-tests.mjs
+   node tests/run-calendar-tests.mjs
+   ```
+2. Run the manual checks marked **[MANUAL]**.
+3. Fill the `TESTS` block in the commit message verbatim using the reporting format. The total automated count must equal `18 + 42 + 35 = 95` PASS lines (no FAIL, no PARTIAL).
+4. The commit is rejected if any line reads `FAIL`. A `PARTIAL` is allowed only with a written justification.
+5. The commit is also rejected if the test count is < the lines listed in the example block — i.e. every test ID in the example must be present in the commit body, even if a single test is `PARTIAL`.

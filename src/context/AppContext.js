@@ -525,18 +525,7 @@ export function AppProvider({ children }) {
         }
       };
 
-      // (a) Implicit "starts in 30 min" warning whenever a start is set.
-      if (task.startDate) {
-        const t = new Date(task.startDate);
-        t.setMinutes(t.getMinutes() - 30);
-        await scheduleOne(t, {
-          title: 'Task starting soon',
-          body: `"${task.title}" starts in 30 min`,
-          data: { kind: 'task-reminder', taskId: task.id },
-        });
-      }
-
-      // (b) User-picked "before expiry" reminder replaces the implicit 1hr
+      // (a) User-picked "before expiry" reminder replaces the implicit 1hr
       //     warning. If the user is picking their own offset, ignore the
       //     default to avoid duplicate notifications.
       const hasBeforeExpiry =
@@ -561,7 +550,7 @@ export function AppProvider({ children }) {
         });
       }
 
-      // (c) User-picked custom one-shot at an exact datetime.
+      // (b) User-picked custom one-shot at an exact datetime.
       if (task.customReminderTime) {
         await scheduleOne(new Date(task.customReminderTime), {
           title: 'Task reminder',

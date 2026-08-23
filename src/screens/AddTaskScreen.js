@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
-  ScrollView, Alert, Switch,
+  ScrollView, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,25 +11,27 @@ import { useToast } from '../context/ToastContext';
 import { useTheme, FONTS, RADIUS, SHADOW, SPACING } from '../utils/theme';
 import PrimaryButton from '../components/PrimaryButton';
 import InlineTimePicker from '../components/InlineTimePicker';
-import InlineDatePicker from '../components/InlineDatePicker';
-import { format, addMinutes, isPast, isToday } from 'date-fns';
+import MonthGridCalendar from '../components/MonthGridCalendar';
+import { format, addMinutes, isPast } from 'date-fns';
 import { relTime } from '../utils/relTime';
+import {
+  BEFORE_EXPIRY_PRESETS,
+  activeChipLabel,
+  isCustomStepperVisible,
+  minutesToParts,
+  clampUnitValue,
+  partsToMinutes,
+  partsWithinMax,
+  maxBeforeExpiryMinutes,
+  maxForUnit,
+  UNITS,
+} from '../utils/beforeExpiry';
 
 const genId = () => `task_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
-// Preset offsets for the "before expiry" reminder. `null` opens a custom
-// stepper controlled by `customBeforeExpiry`.
-const BEFORE_EXPIRY_PRESETS = [
-  { label: '5 min',     minutes: 5 },
-  { label: '15 min',    minutes: 15 },
-  { label: '30 min',    minutes: 30 },
-  { label: '1 hour',    minutes: 60 },
-  { label: '2 hours',   minutes: 120 },
-  { label: '1 day',     minutes: 1440 },
-  { label: 'Custom…',   minutes: null },
-];
-
-const DEFAULT_CUSTOM_BEFORE_EXPIRY = 45; // minutes — used when the user picks "Custom"
+// Default value seeded into the custom stepper the first time the user
+// picks "Custom…". Pure number of minutes.
+const DEFAULT_CUSTOM_BEFORE_EXPIRY = 45;
 
 /**
  * Reads the first non-empty HH:mm portion of a Date so we can render a
@@ -67,37 +69,59 @@ function TimeField({ label, value, onChange, COLORS }) {
 }
 
 /**
- * Date+time card — used for start, expiry, and the custom one-shot.
- * Renders the inline date stepper on top, then the time wheels below.
+ * Date+time card — used for the expiry card and the custom one-shot.
+ * Renders the inline month-grid calendar on top, then the time wheels
+ * below. Accepts an optional `maxDate` so the custom-reminder card can
+ * cap itself at the expiry.
  */
-function DateTimeCard({ label, icon, iconColor, value, onChange, onClear, COLORS, dismissTime = false }) {
+function DateTimeCard({ label, icon, iconColor, value, onChange, onClear, COLORS, dismissTime = false, maxDate = null }) {
   const desc = describeDateTime(value);
+
+  // Tap on the header (when unset) seeds a default so the picker
+  // appears. When set, the header is just a label — the picker below
+  // is the actual touch target, so we don't trap touches in a parent
+  // TouchableOpacity.
+  const seedDefault = () => {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() + 60 - (d.getMinutes() % 5 === 0 ? 0 : 5 - (d.getMinutes() % 5)));
+    d.setSeconds(0, 0);
+    onChange(d);
+  };
+
   return (
     <View style={[styles.card, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}>
-      <View style={styles.cardHeader}>
+      <TouchableOpacity
+        activeOpacity={0.7}
+        onPress={() => { if (!value) seedDefault(); }}
+        style={styles.cardHeader}
+      >
         <View style={[styles.cardIconWrap, { backgroundColor: (iconColor || COLORS.accent) + '22' }]}>
           <Ionicons name={icon} size={18} color={iconColor || COLORS.accent} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={[styles.cardTitle, { color: COLORS.text }]}>{label}</Text>
           <Text style={[styles.cardSub, { color: COLORS.textMuted }]}>
-            {desc ? `${desc.formatted} • ${desc.time}` : 'Not set'}
+            {desc ? `${desc.formatted} • ${desc.time}` : 'Not set — tap to add'}
           </Text>
         </View>
         {value && onClear && (
-          <TouchableOpacity onPress={onClear} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <TouchableOpacity
+            onPress={(e) => { e?.stopPropagation?.(); onClear(); }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
             <Ionicons name="close-circle" size={20} color={COLORS.textMuted} />
           </TouchableOpacity>
         )}
-      </View>
+      </TouchableOpacity>
 
       {value && (
         <>
           <View style={styles.dateWrap}>
-            <InlineDatePicker
+            <MonthGridCalendar
               value={value}
               onChange={onChange}
               minDate={new Date()}
+              maxDate={maxDate}
               accent={COLORS.accent}
               surface={COLORS.surface}
               surfaceAlt={COLORS.surfaceAlt}
@@ -112,22 +136,6 @@ function DateTimeCard({ label, icon, iconColor, value, onChange, onClear, COLORS
             </View>
           )}
         </>
-      )}
-
-      {!value && (
-        <TouchableOpacity
-          style={[styles.setBtn, { backgroundColor: COLORS.surface, borderColor: COLORS.border }]}
-          onPress={() => {
-            // Seed with 1 hour from now, rounded to the next 5 minutes.
-            const d = new Date();
-            d.setMinutes(d.getMinutes() + 60 - (d.getMinutes() % 5 === 0 ? 0 : 5 - (d.getMinutes() % 5)));
-            d.setSeconds(0, 0);
-            onChange(d);
-          }}
-        >
-          <Ionicons name="add" size={14} color={COLORS.accent} />
-          <Text style={[styles.setBtnText, { color: COLORS.accent }]}>Set {label.toLowerCase()}</Text>
-        </TouchableOpacity>
       )}
     </View>
   );
@@ -153,49 +161,128 @@ export default function AddTaskScreen() {
   const [notes,      setNotes]      = useState(editingTask?.notes || '');
   const [categoryId, setCategoryId] = useState(editingTask?.categoryId || state.categories[0]?.id || null);
   const [priority,   setPriority]   = useState(editingTask?.priority || 'Medium');
-  const [startDate,  setStartDate]  = useState(editingTask?.startDate  ? new Date(editingTask.startDate)  : null);
   const [expiryDate, setExpiryDate] = useState(editingTask?.expiryDate ? new Date(editingTask.expiryDate) : null);
 
-  // Custom one-shot reminder state.
-  const [customOn,      setCustomOn]      = useState(!!editingTask?.customReminderTime);
-  const [customDate,    setCustomDate]    = useState(() => {
+  // Custom one-shot reminder state. `customDate` is the full fire-at
+  // datetime. The user picks it via the inline month-grid calendar +
+  // time wheel. When an expiry is set, the calendar caps at the
+  // expiry date so the reminder can't fire after the task expires.
+  const [customOn,   setCustomOn]   = useState(!!editingTask?.customReminderTime);
+  const [customDate, setCustomDate] = useState(() => {
     if (editingTask?.customReminderTime) return new Date(editingTask.customReminderTime);
     const d = new Date();
     d.setHours(d.getHours() + 1, 0, 0, 0);
     return d;
   });
 
-  // Before-expiry reminder state. `beforeExpiryMinutes` is a number or null.
+  // Before-expiry reminder state. `beforeExpiryMinutes` is the value used
+  // when saving (a number or null). The custom stepper drives a
+  // three-unit {days, hours, minutes} split plus an active unit; the
+  // total minutes is recomputed via partsToMinutes() whenever the user
+  // is in custom mode. `beforeExpiryCustomMode` is a separate latched
+  // flag so we can stay in "Custom" mode even when the picked number
+  // happens to coincide with a preset (e.g. 60 min == "1 hour").
   const [beforeExpiryOn, setBeforeExpiryOn] = useState(() => {
     const v = editingTask?.beforeExpiryMinutes;
     return typeof v === 'number' && v > 0;
   });
-  const [beforeExpiryMinutes, setBeforeExpiryMinutes] = useState(
-    typeof editingTask?.beforeExpiryMinutes === 'number' && editingTask.beforeExpiryMinutes > 0
-      ? editingTask.beforeExpiryMinutes
-      : 30,
+  const [beforeExpiryMinutes, setBeforeExpiryMinutes] = useState(() => {
+    const v = editingTask?.beforeExpiryMinutes;
+    return typeof v === 'number' && v > 0 ? v : 30;
+  });
+
+  // Seed the d/h/m parts and active unit from the saved value, or from
+  // a sensible default if there's nothing saved yet.
+  const _seedParts = (() => {
+    const v = editingTask?.beforeExpiryMinutes;
+    if (typeof v === 'number' && v > 0) return minutesToParts(v);
+    return minutesToParts(DEFAULT_CUSTOM_BEFORE_EXPIRY);
+  })();
+  const [beforeExpiryCustomDays,    setBeforeExpiryCustomDays]    = useState(_seedParts.days);
+  const [beforeExpiryCustomHours,   setBeforeExpiryCustomHours]   = useState(_seedParts.hours);
+  const [beforeExpiryCustomMinutes, setBeforeExpiryCustomMinutes] = useState(_seedParts.minutes);
+  const [beforeExpiryCustomUnit,    setBeforeExpiryCustomUnit]    = useState(
+    _seedParts.days > 0 ? 'days' : _seedParts.hours > 0 ? 'hours' : 'minutes',
   );
-  const [beforeExpiryCustom, setBeforeExpiryCustom] = useState(
-    typeof editingTask?.beforeExpiryMinutes === 'number' &&
-      editingTask.beforeExpiryMinutes > 0 &&
-      !BEFORE_EXPIRY_PRESETS.some((p) => p.minutes === editingTask.beforeExpiryMinutes)
-      ? editingTask.beforeExpiryMinutes
-      : DEFAULT_CUSTOM_BEFORE_EXPIRY,
-  );
+
+  // Distinct boolean so "Custom…" stays selected even when the value
+  // matches a preset (e.g. user incremented to 60).
+  const [beforeExpiryCustomMode, setBeforeExpiryCustomMode] = useState(() => {
+    const v = editingTask?.beforeExpiryMinutes;
+    return typeof v === 'number' && v > 0 &&
+      !BEFORE_EXPIRY_PRESETS.some((p) => p.minutes === v);
+  });
+
+  // While in custom mode, keep `beforeExpiryMinutes` in sync with the
+  // d/h/m sum. While in preset mode (not custom), keep the d/h/m parts
+  // mirrored from the active preset so a later "Custom…" tap picks up
+  // where the user left off.
+  useEffect(() => {
+    if (beforeExpiryCustomMode) {
+      const total = partsToMinutes({
+        days: beforeExpiryCustomDays,
+        hours: beforeExpiryCustomHours,
+        minutes: beforeExpiryCustomMinutes,
+      });
+      setBeforeExpiryMinutes(total);
+    } else {
+      const parts = minutesToParts(beforeExpiryMinutes);
+      setBeforeExpiryCustomDays(parts.days);
+      setBeforeExpiryCustomHours(parts.hours);
+      setBeforeExpiryCustomMinutes(parts.minutes);
+    }
+  }, [
+    beforeExpiryCustomMode,
+    beforeExpiryCustomDays, beforeExpiryCustomHours, beforeExpiryCustomMinutes,
+    beforeExpiryMinutes,
+  ]);
+
+  // Dynamic cap: max minutes the user can pick, given the current
+  // expiryDate. Null when expiry is missing or already in the past —
+  // in that case the before-expiry card is hidden (see JSX below).
+  const dynamicMaxMinutes = expiryDate ? maxBeforeExpiryMinutes(expiryDate) : null;
+
+  // When the dynamic cap shrinks (e.g. user shortened the expiry),
+  // clamp the d/h/m parts down so the total never exceeds it.
+  useEffect(() => {
+    if (!beforeExpiryCustomMode || dynamicMaxMinutes == null) return;
+    const total =
+      beforeExpiryCustomDays * 1440 +
+      beforeExpiryCustomHours * 60 +
+      beforeExpiryCustomMinutes;
+    if (total <= dynamicMaxMinutes) return;
+    const clamped = partsWithinMax(dynamicMaxMinutes);
+    setBeforeExpiryCustomDays(clamped.days);
+    setBeforeExpiryCustomHours(clamped.hours);
+    setBeforeExpiryCustomMinutes(clamped.minutes);
+  }, [
+    dynamicMaxMinutes,
+    beforeExpiryCustomMode,
+    beforeExpiryCustomDays,
+    beforeExpiryCustomHours,
+    beforeExpiryCustomMinutes,
+  ]);
 
   const handleSubmit = () => {
     if (!title.trim()) { Alert.alert('Missing title', 'Please enter a task title.'); return; }
-    if (expiryDate && startDate && expiryDate <= startDate) {
-      Alert.alert('Invalid dates', 'Expiry must be after start date.'); return;
-    }
     if (customOn && isPast(customDate)) {
       Alert.alert('Invalid time', 'Custom reminder must be in the future.'); return;
+    }
+    // Reminder must also be before the expiry when one is set.
+    if (customOn && expiryDate && customDate > expiryDate) {
+      Alert.alert('Invalid time', 'Custom reminder cannot be after the expiry date.'); return;
     }
     if (beforeExpiryOn && !expiryDate) {
       Alert.alert('Missing expiry', 'Set an expiry date to use a before-expiry reminder.'); return;
     }
-    if (beforeExpiryOn && expiryDate && addMinutes(expiryDate, -beforeExpiryMinutes) <= new Date()) {
-      Alert.alert('Too soon', 'This expiry is too close for the chosen reminder offset.'); return;
+    if (beforeExpiryOn && expiryDate) {
+      const max = maxBeforeExpiryMinutes(expiryDate);
+      if (max == null || beforeExpiryMinutes > max) {
+        Alert.alert('Too soon', 'This expiry is too close for the chosen reminder offset.'); return;
+      }
+      if (addMinutes(expiryDate, -beforeExpiryMinutes) <= new Date()) {
+        Alert.alert('Too soon', 'This expiry is too close for the chosen reminder offset.'); return;
+      }
     }
 
     const task = {
@@ -205,7 +292,6 @@ export default function AddTaskScreen() {
       notes: notes.trim(),
       categoryId,
       priority,
-      startDate:  startDate  ? startDate.toISOString()  : null,
       expiryDate: expiryDate ? expiryDate.toISOString() : null,
       customReminderTime: customOn ? customDate.toISOString() : null,
       beforeExpiryMinutes: beforeExpiryOn ? beforeExpiryMinutes : null,
@@ -329,20 +415,6 @@ export default function AddTaskScreen() {
           </View>
         </View>
 
-        {/* Start date & time */}
-        <View style={styles.field}>
-          <Text style={[styles.label, { color: COLORS.textMuted }]}>START</Text>
-          <DateTimeCard
-            label="Start date & time"
-            icon="calendar-outline"
-            iconColor={COLORS.accent}
-            value={startDate}
-            onChange={setStartDate}
-            onClear={() => setStartDate(null)}
-            COLORS={COLORS}
-          />
-        </View>
-
         {/* Expiry date & time */}
         <View style={styles.field}>
           <Text style={[styles.label, { color: COLORS.textMuted }]}>EXPIRY</Text>
@@ -361,9 +433,13 @@ export default function AddTaskScreen() {
         <View style={styles.field}>
           <Text style={[styles.label, { color: COLORS.textMuted }]}>REMINDERS</Text>
 
-          {/* Custom one-shot reminder */}
+          {/* Custom one-shot reminder — tap the header to toggle. */}
           <View style={[styles.card, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}>
-            <View style={styles.cardHeader}>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => setCustomOn(v => !v)}
+              style={styles.cardHeader}
+            >
               <View style={[styles.cardIconWrap, { backgroundColor: COLORS.accent + '22' }]}>
                 <Ionicons name="notifications-outline" size={18} color={COLORS.accent} />
               </View>
@@ -371,24 +447,29 @@ export default function AddTaskScreen() {
                 <Text style={[styles.cardTitle, { color: COLORS.text }]}>Custom reminder</Text>
                 <Text style={[styles.cardSub, { color: COLORS.textMuted }]}>
                   {customOn
-                    ? `${format(customDate, 'EEE, MMM d • h:mm a')}${isToday(customDate) ? ' (today)' : ''}`
-                    : 'Off — toggle on for a one-shot at a specific time'}
+                    ? `${format(customDate, 'EEE, MMM d • h:mm a')}${
+                        expiryDate && customDate > expiryDate ? ' · after expiry!' : ''
+                      }`
+                    : 'Tap to enable — one-shot at a specific time'}
                 </Text>
               </View>
-              <Switch
-                value={customOn}
-                onValueChange={setCustomOn}
-                trackColor={{ false: COLORS.border, true: COLORS.accent + '88' }}
-                thumbColor={customOn ? COLORS.accent : COLORS.textMuted}
-              />
-            </View>
+              {customOn && (
+                <TouchableOpacity
+                  onPress={(e) => { e?.stopPropagation?.(); setCustomOn(false); }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="close-circle" size={20} color={COLORS.textMuted} />
+                </TouchableOpacity>
+              )}
+            </TouchableOpacity>
 
             {customOn && (
               <View style={{ marginTop: 10 }}>
-                <InlineDatePicker
+                <MonthGridCalendar
                   value={customDate}
                   onChange={setCustomDate}
                   minDate={new Date()}
+                  maxDate={expiryDate}
                   accent={COLORS.accent}
                   surface={COLORS.surface}
                   surfaceAlt={COLORS.surfaceAlt}
@@ -403,37 +484,56 @@ export default function AddTaskScreen() {
             )}
           </View>
 
-          {/* Before-expiry reminder */}
+          {/* Before-expiry reminder — only available when an expiry is set. */}
+          {expiryDate && (
           <View style={[styles.card, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border, marginTop: SPACING.sm }]}>
-            <View style={styles.cardHeader}>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => setBeforeExpiryOn(v => !v)}
+              style={styles.cardHeader}
+            >
               <View style={[styles.cardIconWrap, { backgroundColor: COLORS.danger + '22' }]}>
                 <Ionicons name="timer-outline" size={18} color={COLORS.danger} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.cardTitle, { color: COLORS.text }]}>Before expiry</Text>
                 <Text style={[styles.cardSub, { color: COLORS.textMuted }]}>
-                  {beforeExpiryOn
-                    ? expiryDate
-                      ? `Notify ${beforeExpiryMinutes} min before expiry`
-                      : 'Set an expiry date to use this'
-                    : 'Off — toggle on to fire before expiry'}
+                  {(() => {
+                    if (!beforeExpiryOn) return 'Tap to enable — fires before the task expires';
+                    if (!expiryDate)    return 'Set an expiry date to use this';
+                    const d = beforeExpiryCustomDays;
+                    const h = beforeExpiryCustomHours;
+                    const m = beforeExpiryCustomMinutes;
+                    const parts = [];
+                    if (d) parts.push(`${d} day${d === 1 ? '' : 's'}`);
+                    if (h) parts.push(`${h} hour${h === 1 ? '' : 's'}`);
+                    if (m) parts.push(`${m} min`);
+                    const breakdown = parts.length ? parts.join(' ') : '0 min';
+                    const cap = dynamicMaxMinutes;
+                    return cap
+                      ? `Notify ${breakdown} (${beforeExpiryMinutes} min) before expiry — max ${cap} min`
+                      : `Notify ${breakdown} (${beforeExpiryMinutes} min) before expiry`;
+                  })()}
                 </Text>
               </View>
-              <Switch
-                value={beforeExpiryOn}
-                onValueChange={setBeforeExpiryOn}
-                trackColor={{ false: COLORS.border, true: COLORS.danger + '88' }}
-                thumbColor={beforeExpiryOn ? COLORS.danger : COLORS.textMuted}
-              />
-            </View>
+              {beforeExpiryOn && (
+                <TouchableOpacity
+                  onPress={(e) => { e?.stopPropagation?.(); setBeforeExpiryOn(false); }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="close-circle" size={20} color={COLORS.textMuted} />
+                </TouchableOpacity>
+              )}
+            </TouchableOpacity>
 
             {beforeExpiryOn && (
               <View style={{ marginTop: 10 }}>
                 <View style={styles.presetGrid}>
                   {BEFORE_EXPIRY_PRESETS.map((p) => {
-                    const active = p.minutes === null
-                      ? !BEFORE_EXPIRY_PRESETS.some((q) => q.minutes === beforeExpiryMinutes)
-                      : beforeExpiryMinutes === p.minutes;
+                    const active = p.label === activeChipLabel({
+                      minutes: beforeExpiryMinutes,
+                      customMode: beforeExpiryCustomMode,
+                    });
                     return (
                       <TouchableOpacity
                         key={p.label}
@@ -444,8 +544,16 @@ export default function AddTaskScreen() {
                         ]}
                         onPress={() => {
                           if (p.minutes === null) {
-                            setBeforeExpiryMinutes(beforeExpiryCustom);
+                            // Tap "Custom…" — enter custom mode. The d/h/m
+                            // parts mirror beforeExpiryMinutes while in
+                            // preset mode (via useEffect), so the user picks
+                            // up where they left off.
+                            setBeforeExpiryCustomMode(true);
                           } else {
+                            // Tap a named preset — exit custom mode and set
+                            // the value. The useEffect re-seeds the parts
+                            // from this preset's minutes.
+                            setBeforeExpiryCustomMode(false);
                             setBeforeExpiryMinutes(p.minutes);
                           }
                         }}
@@ -462,40 +570,146 @@ export default function AddTaskScreen() {
                   })}
                 </View>
 
-                {/* Custom stepper — visible only when "Custom…" is active. */}
-                {!BEFORE_EXPIRY_PRESETS.some((q) => q.minutes === beforeExpiryMinutes) && (
+                {/* Custom stepper — visible whenever custom mode is on. */}
+                {isCustomStepperVisible({
+                  minutes: beforeExpiryMinutes,
+                  customMode: beforeExpiryCustomMode,
+                }) && (
                   <View style={[styles.customStepper, { backgroundColor: COLORS.surface, borderColor: COLORS.border }]}>
-                    <TouchableOpacity
-                      style={[styles.stepperBtn, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}
-                      onPress={() => {
-                        const n = Math.max(1, beforeExpiryCustom - 5);
-                        setBeforeExpiryCustom(n);
-                        setBeforeExpiryMinutes(n);
-                      }}
-                    >
-                      <Ionicons name="remove" size={16} color={COLORS.danger} />
-                    </TouchableOpacity>
-                    <View style={styles.stepperMid}>
-                      <Text style={[styles.stepperValue, { color: COLORS.text }]}>
-                        {beforeExpiryCustom}
-                      </Text>
-                      <Text style={[styles.stepperUnit, { color: COLORS.textMuted }]}>minutes</Text>
+                    {/* Unit chips: days / hours / minutes. */}
+                    <View style={styles.unitChipRow}>
+                      {UNITS.map((u) => {
+                        const isActive = beforeExpiryCustomUnit === u;
+                        return (
+                          <TouchableOpacity
+                            key={u}
+                            style={[
+                              styles.unitChip,
+                              { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border },
+                              isActive && { backgroundColor: COLORS.danger + '22', borderColor: COLORS.danger },
+                            ]}
+                            onPress={() => setBeforeExpiryCustomUnit(u)}
+                          >
+                            <Text style={[
+                              styles.unitChipText,
+                              { color: COLORS.textMuted },
+                              isActive && { color: COLORS.danger },
+                            ]}>
+                              {u}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
                     </View>
-                    <TouchableOpacity
-                      style={[styles.stepperBtn, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}
-                      onPress={() => {
-                        const n = Math.min(7 * 24 * 60, beforeExpiryCustom + 5);
-                        setBeforeExpiryCustom(n);
-                        setBeforeExpiryMinutes(n);
-                      }}
-                    >
-                      <Ionicons name="add" size={16} color={COLORS.danger} />
-                    </TouchableOpacity>
+
+                    {/* Stepper row — +/- on the active unit, clamped to its
+                        range AND the dynamic cap from time-to-expiry. */}
+                    <View style={styles.stepperRow}>
+                      <TouchableOpacity
+                        style={[styles.stepperBtn, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}
+                        onPress={() => {
+                          if (beforeExpiryCustomUnit === 'days') {
+                            setBeforeExpiryCustomDays(clampUnitValue(beforeExpiryCustomDays - 1, 'days'));
+                          } else if (beforeExpiryCustomUnit === 'hours') {
+                            setBeforeExpiryCustomHours(clampUnitValue(beforeExpiryCustomHours - 1, 'hours'));
+                          } else {
+                            // minutes step by 5 to stay usable; clamp to [0, 59].
+                            setBeforeExpiryCustomMinutes(clampUnitValue(beforeExpiryCustomMinutes - 5, 'minutes'));
+                          }
+                        }}
+                      >
+                        <Ionicons name="remove" size={16} color={COLORS.danger} />
+                      </TouchableOpacity>
+                      <View style={styles.stepperMid}>
+                        <Text style={[styles.stepperValue, { color: COLORS.text }]}>
+                          {beforeExpiryCustomUnit === 'days'
+                            ? beforeExpiryCustomDays
+                            : beforeExpiryCustomUnit === 'hours'
+                              ? beforeExpiryCustomHours
+                              : beforeExpiryCustomMinutes}
+                        </Text>
+                        <Text style={[styles.stepperUnit, { color: COLORS.textMuted }]}>
+                          {(() => {
+                            const cap = dynamicMaxMinutes;
+                            if (cap == null) {
+                              return beforeExpiryCustomUnit === 'minutes' ? 'minutes (step 5)' : beforeExpiryCustomUnit;
+                            }
+                            const unitMax = maxForUnit(
+                              beforeExpiryCustomUnit,
+                              {
+                                days: beforeExpiryCustomDays,
+                                hours: beforeExpiryCustomHours,
+                                minutes: beforeExpiryCustomMinutes,
+                              },
+                              cap,
+                            );
+                            const label = beforeExpiryCustomUnit === 'minutes' ? 'minutes' : beforeExpiryCustomUnit;
+                            return `${label} · max ${unitMax}`;
+                          })()}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.stepperBtn, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}
+                        onPress={() => {
+                          if (beforeExpiryCustomUnit === 'days') {
+                            const cap = dynamicMaxMinutes ?? 7 * 24 * 60;
+                            const unitMax = maxForUnit('days',
+                              {
+                                days: beforeExpiryCustomDays,
+                                hours: beforeExpiryCustomHours,
+                                minutes: beforeExpiryCustomMinutes,
+                              }, cap);
+                            const next = Math.min(unitMax, beforeExpiryCustomDays + 1);
+                            setBeforeExpiryCustomDays(next);
+                          } else if (beforeExpiryCustomUnit === 'hours') {
+                            const cap = dynamicMaxMinutes ?? 7 * 24 * 60;
+                            const unitMax = maxForUnit('hours',
+                              {
+                                days: beforeExpiryCustomDays,
+                                hours: beforeExpiryCustomHours,
+                                minutes: beforeExpiryCustomMinutes,
+                              }, cap);
+                            const next = Math.min(unitMax, beforeExpiryCustomHours + 1);
+                            setBeforeExpiryCustomHours(next);
+                          } else {
+                            const cap = dynamicMaxMinutes ?? 7 * 24 * 60;
+                            const unitMax = maxForUnit('minutes',
+                              {
+                                days: beforeExpiryCustomDays,
+                                hours: beforeExpiryCustomHours,
+                                minutes: beforeExpiryCustomMinutes,
+                              }, cap);
+                            const step = 5;
+                            const next = Math.min(unitMax, beforeExpiryCustomMinutes + step);
+                            setBeforeExpiryCustomMinutes(next);
+                          }
+                        }}
+                      >
+                        <Ionicons name="add" size={16} color={COLORS.danger} />
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Summary of the total — shows the d/h/m breakdown + total minutes. */}
+                    <Text style={[styles.stepperSummary, { color: COLORS.textMuted }]}>
+                      {(() => {
+                        const d = beforeExpiryCustomDays;
+                        const h = beforeExpiryCustomHours;
+                        const m = beforeExpiryCustomMinutes;
+                        const parts = [];
+                        if (d) parts.push(`${d} day${d === 1 ? '' : 's'}`);
+                        if (h) parts.push(`${h} hour${h === 1 ? '' : 's'}`);
+                        if (m) parts.push(`${m} min`);
+                        const breakdown = parts.length ? parts.join(' ') : '0 min';
+                        return `Notify ${breakdown} (${beforeExpiryMinutes} min) before expiry`;
+                      })()}
+                    </Text>
                   </View>
                 )}
               </View>
             )}
           </View>
+          )}
+
         </View>
 
         {/* Created/Last edited timestamps */}
@@ -604,12 +818,29 @@ const styles = StyleSheet.create({
   presetChipText: { fontSize: 12, fontWeight: '700' },
 
   customStepper: {
-    flexDirection: 'row',
-    alignItems: 'center',
     marginTop: 10,
     borderRadius: RADIUS.md,
     borderWidth: 1,
     padding: 8,
+    gap: 8,
+  },
+  
+  unitChipRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  unitChip: {
+    flex: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  unitChipText: { fontSize: 12, fontWeight: '700', textTransform: 'capitalize' },
+  stepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
   },
   stepperBtn: {
@@ -623,4 +854,5 @@ const styles = StyleSheet.create({
   stepperMid: { flex: 1, alignItems: 'center' },
   stepperValue: { fontSize: 22, fontWeight: '800' },
   stepperUnit: { fontSize: 10, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', marginTop: 2 },
+  stepperSummary: { fontSize: 11, textAlign: 'center', marginTop: 2 },
 });
