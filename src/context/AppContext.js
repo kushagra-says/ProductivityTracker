@@ -10,6 +10,7 @@ import { AppState, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { defaultCategoryColors } from '../utils/theme';
+import { todayKey, hasActivityToday, computeNextStreak } from '../utils/streak';
 
 // ─── Notification handler & channel ─────────────────────────────────────────
 // sounds + vibration. On Android we have to create a channel before the
@@ -47,14 +48,6 @@ function decorate(content) {
 
 const STORAGE_KEY = '@pt_state';
 
-// YYYY-MM-DD in local time. Used for hobby completions + streak comparisons.
-const todayKey = (d = new Date()) => {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-};
-
 const initialSettings = {
   tasksReminderEnabled: false,
   tasksReminderTime: '20:00',
@@ -80,13 +73,27 @@ const initialState = {
 
 function appReducer(state, action) {
   switch (action.type) {
-    case 'LOAD_STATE':
+    case 'LOAD_STATE': {
+      // One-time migration: a previous version of the streak logic could
+      // leave the user in an inconsistent state (streak=0 but
+      // lastActiveDate=today), which the new helper cannot resolve
+      // because "credit held, no activity" maps to "revert" and "credit
+      // held, activity present" maps to "noop". Clear the anchor so the
+      // next action runs through the normal path.
+      const loaded = action.payload || {};
+      const loadedStreak = typeof loaded.streak === 'number' ? loaded.streak : 0;
+      const loadedAnchor = loaded.lastActiveDate ?? null;
+      const todayStr = todayKey();
+      const cleanStreak = loadedStreak;
+      const cleanAnchor = (loadedStreak === 0 && loadedAnchor === todayStr) ? null : loadedAnchor;
       return {
         ...state,
-        ...action.payload,
-        settings: { ...initialSettings, ...(action.payload?.settings || {}) },
+        ...loaded,
+        streak: cleanStreak,
+        lastActiveDate: cleanAnchor,
+        settings: { ...initialSettings, ...(loaded.settings || {}) },
         // Backfill missing reminder fields on saved tasks (added in v1.3).
-        tasks: (action.payload?.tasks || []).map((t) => ({
+        tasks: (loaded.tasks || []).map((t) => ({
           // Drop the old recurring fields silently if any task ever had them
           // — they're no longer scheduled anywhere.
           reminderTime: undefined,
@@ -96,6 +103,7 @@ function appReducer(state, action) {
           beforeExpiryMinutes: t.beforeExpiryMinutes ?? null,
         })),
       };
+    }
 
     case 'ADD_TASK':
       return {
@@ -188,10 +196,11 @@ function appReducer(state, action) {
     }
 
     case 'UPDATE_STREAK':
+      // payload: { kind: 'credit' | 'revert', streak, anchorDate }
       return {
         ...state,
         streak: action.payload.streak,
-        lastActiveDate: action.payload.date,
+        lastActiveDate: action.payload.anchorDate,
       };
 
     case 'UPDATE_SETTINGS':
@@ -203,22 +212,6 @@ function appReducer(state, action) {
 }
 
 const AppContext = createContext(null);
-
-// True iff the user has at least one task completed whose completedAt
-// falls within today's local-day window.
-function hasCompletionToday(tasks, ref = new Date()) {
-  const start = new Date(ref);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(ref);
-  end.setHours(23, 59, 59, 999);
-  return tasks.some(
-    (t) =>
-      t.status === 'completed' &&
-      t.completedAt &&
-      new Date(t.completedAt) >= start &&
-      new Date(t.completedAt) <= end,
-  );
-}
 
 function pendingTaskCount(tasks, ref = new Date()) {
   const start = new Date(ref);
@@ -340,24 +333,24 @@ export function AppProvider({ children }) {
   // ─── Streak logic ─────────────────────────────────────────────────────────
   // Triggered:
   //   1. Whenever tasks change (immediate feedback when a task completes)
-  //   2. Every 60 seconds (catches midnight rollover while app is open)
-  //   3. When app comes back to foreground
+  //   2. Whenever hobbies change (immediate feedback when a hobby is checked)
+  //   3. Every 60 seconds (catches midnight rollover while app is open)
+  //   4. When app comes back to foreground
   const recomputeStreak = useCallback(() => {
-    const today = todayKey();
-    const yesterday = todayKey(new Date(Date.now() - 86400000));
-    const tasks = tasksRef.current;
-    const lastActiveDate = lastActiveDateRef.current;
-    if (lastActiveDate === today) return; // already credited for today
-    if (!hasCompletionToday(tasks)) return;
-    const newStreak =
-      lastActiveDate === yesterday ? (streakRef.current + 1) : 1;
-    dispatch({ type: 'UPDATE_STREAK', payload: { streak: newStreak, date: today } });
+    const decision = computeNextStreak({
+      tasks: tasksRef.current,
+      hobbies: hobbiesRef.current,
+      anchorDate: lastActiveDateRef.current,
+      currentStreak: streakRef.current,
+    });
+    if (decision.kind === 'noop') return;
+    dispatch({ type: 'UPDATE_STREAK', payload: decision });
   }, []);
 
   useEffect(() => {
     if (!initializedRef.current) return;
     recomputeStreak();
-  }, [state.tasks, recomputeStreak]);
+  }, [state.tasks, state.hobbies, recomputeStreak]);
 
   useEffect(() => {
     const interval = setInterval(recomputeStreak, 60000);
@@ -467,10 +460,10 @@ export function AppProvider({ children }) {
     if (!settings?.streakNudgeEnabled) return;
 
     // Only fire if user has an active streak, hasn't completed anything
-    // yet today, and we're still within today.
+    // yet today (task OR hobby), and we're still within today.
     const streak = streakRef.current;
     if (streak < 1) return;
-    if (hasCompletionToday(tasksRef.current)) return;
+    if (hasActivityToday(tasksRef.current, hobbiesRef.current)) return;
 
     const [hh, mm] = settings.streakNudgeTime.split(':').map((n) => parseInt(n, 10));
     const now = new Date();
