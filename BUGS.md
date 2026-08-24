@@ -6,7 +6,7 @@ This document lists every known issue filed against the ProductivityTracker app.
 |---|---|---|---|
 | 1 | Streak logic | High | ✅ Completed |
 | 2 | Add/Edit Task — reminders | High | ✅ Completed |
-| 3 | Hobby detail — year history grid | High | Open |
+| 3 | Hobby detail — year history grid | High | ✅ Completed |
 | 4 | Midnight rollover | High | Open |
 | 5 | Notifications (sound + vibration) | High | Open |
 | 6 | Reminder time input | Medium | Open |
@@ -98,6 +98,23 @@ This document lists every known issue filed against the ProductivityTracker app.
 
 1. Open any hobby that has completions in the current year.
 2. Note the empty cell blocks appearing for future dates and the month label appearing one week before the actual 1st of a month.
+
+**Status:** ✅ Completed
+
+**Resolution**
+
+The grid was extracted into a pure helper module `src/utils/yearGrid.js` exposing `buildYearWeeks`, `buildMonthLabels`, `januaryAnchor`, `isFutureCell`, `columnCount`, plus the `DOW_LABELS` constant. The `YearGrid` component in `src/screens/HobbyDetailScreen.js` was rewritten to:
+
+- Skip rendering any cell whose date is strictly after today (`isFutureCell` returns null — no ghost, no border).
+- Anchor month labels to the column that actually contains the 1st of the month (`buildMonthLabels` scans each week for a day whose `getDate() === 1`).
+- Tie the day-of-week gutter to `DOW_LABELS` so rowIdx 0..6 maps cleanly to Mon..Sun.
+- End on the rightmost column that contains today, with no trailing "ghost" week.
+
+**Follow-up (inter-month spacing + fixed DOW gutter)**
+
+Per user feedback, the grid was further restructured to render each month as a self-contained block of week columns, separated by a visual `SECTION_GAP` (12px). Inside a block, cells from other months (e.g. Jun 29-30 in the July block, Aug 1-2 in the July block) are skipped at render time using `isCellInMonth`, so the rest of the week becomes empty space. The DOW gutter was moved OUTSIDE the horizontal `ScrollView` so it stays fixed on the left edge while the user scrolls through months, and now uses first-letter labels (`DOW_SHORT`: M, T, W, T, F, S, S).
+
+**Covered by:** `tests/run-year-grid-tests.mjs` (106 PASS — `DOW-01..03b`, `ANCHOR-01..02`, `WEEKS-01..06`, `GRID-01a..04`, `FUTURE-01..04`, `MONTH-EDGE-01..03`, `SECTION-01..22`). `tests.md` Section D.
 
 ---
 

@@ -10,8 +10,12 @@ import { useToast } from '../context/ToastContext';
 import { useTheme, FONTS, RADIUS, SHADOW, SPACING } from '../utils/theme';
 import { currentStreak, longestStreak, lastNDays, dayKey } from '../utils/hobbyStats';
 import {
-  format, startOfMonth, startOfWeek, addDays, isAfter,
-} from 'date-fns';
+  buildMonthSections,
+  isFutureCell,
+  isCellInMonth,
+  DOW_SHORT,
+} from '../utils/yearGrid';
+import { format } from 'date-fns';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 const CHART_HEIGHT = 130;
@@ -20,6 +24,11 @@ const CHART_BAR_GAP = 6;
 // look of the 7-day mini-chart at the top so the two read as one design.
 const CELL = 14;
 const CELL_GAP = 3;
+// Visual gap between month sections in the year grid. The user wants
+// each month to be a self-contained block, so this gap is what makes
+// "July ends on Wednesday, then Aug starts on Thursday" readable at
+// a glance.
+const SECTION_GAP = 12;
 
 function WeekChart({ hobby, COLORS }) {
   const days = lastNDays(7);
@@ -58,147 +67,140 @@ function WeekChart({ hobby, COLORS }) {
   );
 }
 
-// Vertical day-of-week labels (Mon, Wed, Fri) shown on the left edge of
-// the GitHub-style grid. Only every other row is labeled to keep the
-// gutter compact.
-const DOW_LABELS = ['Mon', '', 'Wed', '', 'Fri', '', ''];
+// Vertical day-of-week labels (Mon, Tue, Wed, Thu, Fri, Sat, Sun) shown
+// on the left edge of the GitHub-style grid. `DOW_LABELS` is sourced
+// from `src/utils/yearGrid.js` so the row index of the body matches
+// the label exactly (row 0 = Mon, row 6 = Sun).
 
-// Render the current year of history as a row of weeks (Mon..Sun) like
-// the GitHub contribution graph. The grid starts on the Monday of the
-// week containing Jan 1 of the current year and ends on today's date.
-// Future days in the week containing today are rendered as transparent
-// ghost cells so the rightmost column completes neatly.
+// Render the current year of history as a row of per-month week
+// blocks (Mon..Sun) like the GitHub contribution graph, but with
+// each month rendered as its own self-contained block of weeks, with
+// a visual gap between blocks so the user can see where one month
+// ends and the next begins.
+//
+// Layout rules (Bug 3 fix + inter-month spacing):
+//   - The grid is split into per-month sections. Each section is a
+//     self-contained block of week columns.
+//   - Each block starts on the Monday of the week containing the 1st
+//     of the month, and ends on the Sunday of the week containing the
+//     last day of the month.
+//   - Cells inside a block that don't belong to the block's month
+//     (e.g. Jun 29-30 in the July block, Aug 1-2 in the July block)
+//     are skipped at render time — the block has empty cells in
+//     those positions. This is what creates the visual "empty space
+//     after Wednesday until the next month's block starts on Thursday".
+//   - Cells for days strictly after today are NOT drawn at all
+//     (no ghost, no border).
+//   - The day-of-week gutter maps rowIdx 0..6 to Mon..Sun.
 function YearGrid({ hobby, COLORS }) {
   const today = new Date();
-  // Anchor the grid to the Monday of the week containing Jan 1 of the
-  // current year. Pre-Jan days are transparent placeholders so columns
-  // line up.
-  const startDate = startOfWeek(
-    new Date(today.getFullYear(), 0, 1),
-    { weekStartsOn: 1 },
-  );
-  const endDate = today;
+  const todayK = todayKey(today);
 
-  // Build an array of weeks from startDate..endDate, inclusive.
-  const weeks = [];
-  let cursor = startDate;
-  while (!isAfter(cursor, endDate)) {
-    const week = [];
-    for (let d = 0; d < 7; d++) {
-      week.push(new Date(cursor));
-      cursor = addDays(cursor, 1);
-    }
-    weeks.push(week);
-  }
-  // If the last week doesn't include today, add a trailing week so the
-  // grid can show today's cell always in the rightmost column.
-  if (weeks.length === 0 || weeks[weeks.length - 1][6] < today) {
-    const trailing = [];
-    let t = startOfWeek(addDays(weeks[weeks.length - 1]?.[6] || today, 1), { weekStartsOn: 1 });
-    for (let d = 0; d < 7; d++) {
-      trailing.push(new Date(t));
-      t = addDays(t, 1);
-    }
-    weeks.push(trailing);
-  }
-
-  // For each column, figure out which month label (if any) sits above it.
-  // We place the label wherever the first day of a new month falls.
-  const monthLabels = [];
-  weeks.forEach((week, colIdx) => {
-    const firstDay = week[0];
-    // Only label the column whose Monday is in the first 7 days of a
-    // month — otherwise mid-month labels would appear once and look
-    // like floating words.
-    if (firstDay.getDate() <= 7) {
-      const monthStart = startOfMonth(firstDay);
-      monthLabels.push({
-        colIdx,
-        label: format(monthStart, 'MMM'),
-      });
-    }
-  });
+  // Per-month sections for the current year up to today's month.
+  // Each section has its own weeks array; between sections the render
+  // path inserts a visual gap so the user can see where one month
+  // ends and the next begins.
+  const sections = useMemo(() => buildMonthSections(today), [today]);
 
   return (
-    // Horizontal scroll for the whole graph — GitHub's behaviour on
-    // mobile. The vertical parent ScrollView (screen) provides the
-    // page-level scroll; this inner one lets the user drag the graph
-    // left/right to see earlier/later weeks. The header row and 7 body
-    // rows live inside the same scroller so month labels stay aligned
-    // with their columns as the user scrolls.
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.ghScrollContent}
-    >
-      <View>
-        {/* Month labels row — one absolute slot per week column. */}
-        <View style={styles.ghHeaderRow}>
-          <View style={styles.ghDowGutter} />
-          <View style={styles.ghColumnsArea}>
-            {weeks.map((_, colIdx) => {
-              const lbl = monthLabels.find((m) => m.colIdx === colIdx);
-              return (
-                <View
-                  key={`mh-${colIdx}`}
-                  style={[styles.ghMonthCell, { width: CELL }]}
-                >
-                  {lbl ? (
-                    <Text style={[styles.ghMonthLabel, { color: COLORS.textMuted }]}>
-                      {lbl.label}
-                    </Text>
-                  ) : null}
-                </View>
-              );
-            })}
-          </View>
-        </View>
-
-      {/* Grid body — 7 rows (Mon..Sun) × N week columns. */}
-      <View style={styles.ghBody}>
-        {Array.from({ length: 7 }).map((_, rowIdx) => (
-          <View key={`row-${rowIdx}`} style={styles.ghRow}>
-            <View style={styles.ghDowGutter}>
-              <Text style={[styles.ghDowLabel, { color: COLORS.textMuted }]}>
-                {DOW_LABELS[rowIdx]}
-              </Text>
-            </View>
-            <View style={styles.ghColumnsArea}>
-              {weeks.map((week, colIdx) => {
-                const date = week[rowIdx];
-                const isFuture = isAfter(date, today);
-                // Cells outside the active year still render so the
-                // row spacing is consistent, but as transparent ghosts.
-                const showCell = !isFuture;
-                const k = dayKey(date);
-                const isDone = showCell && !!(hobby.completions && hobby.completions[k]);
-                const isToday = k === todayKey();
-                return (
-                  <View
-                    key={`c-${colIdx}-${rowIdx}`}
-                    style={[
-                      styles.ghCell,
-                      {
-                        width: CELL,
-                        height: CELL,
-                        backgroundColor: !showCell
-                          ? 'transparent'
-                          : isDone
-                            ? hobby.color
-                            : COLORS.border,
-                        borderColor: isToday ? hobby.color : 'transparent',
-                        borderWidth: isToday ? 2 : 0,
-                      },
-                    ]}
-                  />
-                );
-              })}
-            </View>
+    // The day-of-week gutter is FIXED on the left and does NOT scroll
+    // with the history — the user always sees Mon..Sun (first letter
+    // only) regardless of which month they're looking at. The actual
+    // grid (month sections) is the only thing inside the horizontal
+    // ScrollView.
+    <View style={styles.ghRoot}>
+      {/* Fixed DOW gutter on the left edge. */}
+      <View style={styles.ghDowGutter}>
+        {DOW_SHORT.map((letter, i) => (
+          <View key={`dow-${i}`} style={styles.ghDowSlot}>
+            <Text style={[styles.ghDowLabel, { color: COLORS.textMuted }]}>
+              {letter}
+            </Text>
           </View>
         ))}
       </View>
-      </View>
-    </ScrollView>
+
+      {/* Horizontally scrolling region — one row of per-month blocks. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.ghScrollContent}
+      >
+        <View style={styles.ghRow}>
+          {/* Per-month sections. Each section is a self-contained block
+              of week columns with its own month label and a gap after it. */}
+          {sections.map((section, secIdx) => (
+            <View
+              key={`sec-${section.year}-${section.month}`}
+              style={[
+                styles.ghSection,
+                // No trailing gap after the last section.
+                secIdx === sections.length - 1 ? null : { marginRight: SECTION_GAP },
+              ]}
+            >
+              {/* Month label header — sits over the first week column. */}
+              <View style={styles.ghSectionHeader}>
+                <Text style={[styles.ghMonthLabel, { color: COLORS.textMuted }]}>
+                  {section.label}
+                </Text>
+              </View>
+
+              {/* 7 body rows (Mon..Sun) × N week columns for this month.
+                  A skipped cell (out-of-month or future) renders a
+                  transparent spacer of the same dimensions so the
+                  row's flex layout keeps the remaining cells in their
+                  correct column positions. Without the spacer, a row
+                  of [Mon, Tue, null, null, null, null, null] would
+                  compress to the left and break the column alignment
+                  across week columns. */}
+              {Array.from({ length: 7 }).map((_, rowIdx) => (
+                <View key={`row-${rowIdx}`} style={styles.ghRow}>
+                  {section.weeks.map((week, colIdx) => {
+                    const date = week[rowIdx];
+                    if (!isCellInMonth(date, section.year, section.month)) {
+                      return (
+                        <View
+                          key={`sp-${secIdx}-${colIdx}-${rowIdx}`}
+                          style={styles.ghCellSpacer}
+                        />
+                      );
+                    }
+                    if (isFutureCell(date, today)) {
+                      return (
+                        <View
+                          key={`sp-${secIdx}-${colIdx}-${rowIdx}`}
+                          style={styles.ghCellSpacer}
+                        />
+                      );
+                    }
+                    const k = dayKey(date);
+                    const isDone = !!(hobby.completions && hobby.completions[k]);
+                    const isToday = k === todayK;
+                    return (
+                      <View
+                        key={`c-${secIdx}-${colIdx}-${rowIdx}`}
+                        style={[
+                          styles.ghCell,
+                          {
+                            width: CELL,
+                            height: CELL,
+                            backgroundColor: isDone
+                              ? hobby.color
+                              : COLORS.border,
+                            borderColor: isToday ? hobby.color : 'transparent',
+                            borderWidth: isToday ? 2 : 0,
+                          },
+                        ]}
+                      />
+                    );
+                  })}
+                </View>
+              ))}
+            </View>
+          ))}
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -402,28 +404,51 @@ const styles = StyleSheet.create({
   chartBar: { width: '80%', borderRadius: 4 },
   chartLabel: { fontSize: 10, fontWeight: '700' },
 
-  // All-time history — GitHub-style contribution graph. The whole grid is
-  // a horizontal list of week columns; rows are days of the week
-  // (Mon..Sun). Months label only the column where the month begins,
-  // matching GitHub. The entire grid scrolls vertically as one block —
-  // individual cells never have their own scroller.
-  ghScrollContent: { paddingRight: SPACING.sm },
-  ghHeaderRow: { flexDirection: 'row', marginBottom: 4 },
-  ghBody:     { flexDirection: 'column' },
-  ghRow:      { flexDirection: 'row' },
+  // All-time history — GitHub-style contribution graph. The grid is
+  // a horizontal list of per-month week blocks, separated by a visual
+  // gap. Rows are days of the week (Mon..Sun). Each block carries its
+  // own month label. The day-of-week gutter on the left is fixed and
+  // does NOT scroll with the history; only the per-month blocks are
+  // inside the horizontal ScrollView.
+  ghRoot: { flexDirection: 'row', alignItems: 'flex-start' },
+  ghScrollContent: { paddingRight: SPACING.sm, alignItems: 'flex-start' },
+  ghRow:      { flexDirection: 'row', alignItems: 'flex-start' },
   ghDowGutter: {
-    width: 30,
+    width: 16,
+    flexDirection: 'column',
+    // The first row of cells in a section starts BELOW the section
+    // header (height 12 + marginBottom 4 = 16). Push the gutter down
+    // by the same amount so the first label (Mon) lines up with the
+    // first row of cells, not with the month label.
+    marginTop: 16,
+    marginRight: CELL_GAP,
+  },
+  ghDowSlot: {
     height: CELL + CELL_GAP,
     justifyContent: 'center',
     alignItems: 'flex-start',
-    paddingTop: 0,
   },
   ghDowLabel: { fontSize: 9, fontWeight: '700' },
-  ghColumnsArea: { flexDirection: 'row' },
-  ghMonthCell:  { height: 12, marginRight: CELL_GAP, justifyContent: 'flex-end' },
+  ghSection:    { flexDirection: 'column' },
+  ghSectionHeader: {
+    height: 12,
+    marginBottom: 4,
+    flexDirection: 'row',
+  },
   ghMonthLabel: { fontSize: 9, fontWeight: '700' },
   ghCell: {
     borderRadius: 2,
+    marginRight: CELL_GAP,
+    marginBottom: CELL_GAP,
+  },
+  // Transparent placeholder rendered in place of a skipped cell
+  // (out-of-month or future) so the surrounding cells in the same
+  // row keep their position. Without this, a row of [Mon, Tue, null,
+  // null, null, null, null] would compress to the left and break
+  // the column alignment across week columns.
+  ghCellSpacer: {
+    width: CELL,
+    height: CELL,
     marginRight: CELL_GAP,
     marginBottom: CELL_GAP,
   },
