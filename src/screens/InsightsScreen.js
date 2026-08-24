@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useApp, todayKey } from '../context/AppContext';
+import { useApp } from '../context/AppContext';
 import { useTheme, FONTS, RADIUS, SHADOW, SPACING } from '../utils/theme';
 import {
   format, subDays, startOfDay, isWithinInterval, endOfDay,
@@ -113,16 +113,15 @@ export default function InsightsScreen() {
   // Hobby rate is fraction of total hobbies checked off for today.
   // Combined is a simple average so each contributes equally.
   const todayStats = useMemo(() => {
-    const now = new Date();
-    const start = startOfDay(now);
-    const end = endOfDay(now);
-    const k = todayKey();
+    const k = state.today;
 
     // Denominator = everything the user could realistically complete today:
-//   - Tasks still pending (and not yet expired).
-//   - Tasks the user already finished today.
-// This keeps the "X of Y" rate stable — completing a task increments both
-// numerator AND denominator, so progress reads correctly throughout the day.
+    //   - Tasks still pending (and not yet expired).
+    //   - Tasks the user already finished today.
+    // This keeps the "X of Y" rate stable — completing a task increments both
+    // numerator AND denominator, so progress reads correctly throughout the day.
+    const start = new Date(k + 'T00:00:00');
+    const end = new Date(k + 'T23:59:59.999');
     const tasksActiveToday = state.tasks.filter((t) => {
       if (t.status === 'expired') return false;
       if (t.status === 'pending') {
@@ -134,12 +133,10 @@ export default function InsightsScreen() {
       }
       return false;
     });
-    const tasksCompletedToday = state.tasks.filter(
-      (t) =>
-        t.status === 'completed' &&
-        t.completedAt &&
-        isWithinInterval(new Date(t.completedAt), { start, end }),
-    );
+    // Completed-today is a subset of active-today (same `completedAt`
+    // window), so derive it from the filtered array instead of walking
+    // the task list a second time.
+    const tasksCompletedToday = tasksActiveToday.filter((t) => t.status === 'completed');
     const taskRate =
       tasksActiveToday.length > 0
         ? Math.round((tasksCompletedToday.length / tasksActiveToday.length) * 100)
@@ -170,7 +167,7 @@ export default function InsightsScreen() {
       combined,
       hasAnyData: sides > 0,
     };
-  }, [state.tasks, state.hobbies]);
+  }, [state.tasks, state.hobbies, state.today]);
 
   const categoryStats = useMemo(() => {
     const cutoff = rangeCutoff(range);

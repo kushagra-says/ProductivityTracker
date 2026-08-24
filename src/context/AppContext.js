@@ -11,6 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { defaultCategoryColors } from '../utils/theme';
 import { todayKey, hasActivityToday, computeNextStreak } from '../utils/streak';
+import { scheduleMidnightLoop } from '../utils/midnight';
 
 // ─── Notification handler & channel ─────────────────────────────────────────
 // sounds + vibration. On Android we have to create a channel before the
@@ -68,6 +69,11 @@ const initialState = {
   hobbies: [],
   streak: 0,
   lastActiveDate: null, // YYYY-MM-DD of the most recent day the user earned a streak increment
+  // The YYYY-MM-DD key for "today" as known to the running app. This
+  // is bumped at every local midnight (Bug 4 fix) so consumers can
+  // re-derive day-bound UI — "Today's hobbies", "Today" filters on
+  // the dashboard — without a manual reload.
+  today: todayKey(),
   settings: initialSettings,
 };
 
@@ -89,6 +95,10 @@ function appReducer(state, action) {
       return {
         ...state,
         ...loaded,
+        // Always stamp the freshest "today" — a previously persisted
+        // `today` (e.g. yesterday) would otherwise persist across an
+        // app relaunch that happens after midnight. Bug 4 fix.
+        today: todayStr,
         streak: cleanStreak,
         lastActiveDate: cleanAnchor,
         settings: { ...initialSettings, ...(loaded.settings || {}) },
@@ -203,6 +213,24 @@ function appReducer(state, action) {
         lastActiveDate: action.payload.anchorDate,
       };
 
+    case 'TICK_MIDNIGHT':
+      // payload: { today: 'YYYY-MM-DD', midnightDate: Date } — the new "today" key
+      // and the exact midnight timestamp. Sweep any tasks that are now in the
+      // past relative to the new day (auto-expire).
+      const midnightDate = action.payload.midnightDate
+        ? new Date(action.payload.midnightDate)
+        : new Date(action.payload.today + 'T00:00:00');
+      return {
+        ...state,
+        today: action.payload.today,
+        tasks: state.tasks.map((t) => {
+          if (t.status !== 'pending') return t;
+          if (!t.expiryDate) return t;
+          if (new Date(t.expiryDate) >= midnightDate) return t;
+          return { ...t, status: 'expired' };
+        }),
+      };
+
     case 'UPDATE_SETTINGS':
       return { ...state, settings: { ...state.settings, ...action.payload } };
 
@@ -281,6 +309,7 @@ export function AppProvider({ children }) {
   const hobbiesRef = useRef(state.hobbies);
   const lastActiveDateRef = useRef(state.lastActiveDate);
   const streakRef = useRef(state.streak);
+  const todayRef = useRef(state.today);
   const initializedRef = useRef(false);
 
   useEffect(() => { settingsRef.current = state.settings; }, [state.settings]);
@@ -288,6 +317,7 @@ export function AppProvider({ children }) {
   useEffect(() => { hobbiesRef.current = state.hobbies; }, [state.hobbies]);
   useEffect(() => { lastActiveDateRef.current = state.lastActiveDate; }, [state.lastActiveDate]);
   useEffect(() => { streakRef.current = state.streak; }, [state.streak]);
+  useEffect(() => { todayRef.current = state.today; }, [state.today]);
 
   // ─── Hydration ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -359,9 +389,34 @@ export function AppProvider({ children }) {
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (s) => {
-      if (s === 'active') recomputeStreak();
+      if (s === 'active') {
+        const now = new Date();
+        const newToday = todayKey(now);
+        if (newToday !== todayRef.current) {
+          // Day changed while app was backgrounded — fire midnight tick.
+          dispatch({ type: 'TICK_MIDNIGHT', payload: { today: newToday, midnightDate: now } });
+        }
+        recomputeStreak();
+      }
     });
     return () => sub?.remove?.();
+  }, [recomputeStreak]);
+
+  // ─── Local-midnight rollover (Bug 4) ─────────────────────────────────────
+  // When the user keeps the app open across midnight, the streak
+  // recompute, the hobby "today" reset, and the auto-expire sweep
+  // must happen at 00:00:00 local — not on a 60-second polling tick
+  // and not just on AppState foreground. The midnight loop fires the
+  // same recompute path but is also responsible for bumping
+  // `state.today` so consumers re-render with the new "today".
+  useEffect(() => {
+    const handle = scheduleMidnightLoop((midnightDate) => {
+      const newToday = todayKey(midnightDate);
+      if (newToday === todayRef.current) return;
+      dispatch({ type: 'TICK_MIDNIGHT', payload: { today: newToday, midnightDate } });
+      recomputeStreak();
+    });
+    return () => handle.cancel();
   }, [recomputeStreak]);
 
   // ─── Notification scheduling helpers (forward-declared for actions) ─────

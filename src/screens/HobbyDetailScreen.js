@@ -5,7 +5,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { useApp, todayKey } from '../context/AppContext';
+import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { useTheme, FONTS, RADIUS, SHADOW, SPACING } from '../utils/theme';
 import { currentStreak, longestStreak, lastNDays, dayKey } from '../utils/hobbyStats';
@@ -30,7 +30,7 @@ const CELL_GAP = 3;
 // a glance.
 const SECTION_GAP = 12;
 
-function WeekChart({ hobby, COLORS }) {
+function WeekChart({ hobby, COLORS, today }) {
   const days = lastNDays(7);
   const max = 1; // 0 or 1 — simple bar chart.
 
@@ -40,7 +40,7 @@ function WeekChart({ hobby, COLORS }) {
         {days.map((d) => {
           const k = dayKey(d);
           const isDone = hobby.completions && hobby.completions[k];
-          const isToday = k === todayKey();
+          const isToday = k === today;
           const height = Math.max(8, (isDone ? 1 : 0) / max * (CHART_HEIGHT - 24));
 
           return (
@@ -92,15 +92,17 @@ function WeekChart({ hobby, COLORS }) {
 //   - Cells for days strictly after today are NOT drawn at all
 //     (no ghost, no border).
 //   - The day-of-week gutter maps rowIdx 0..6 to Mon..Sun.
-function YearGrid({ hobby, COLORS }) {
-  const today = new Date();
-  const todayK = todayKey(today);
+function YearGrid({ hobby, COLORS, today }) {
+  // `today` is the YYYY-MM-DD string from state.today. We also keep
+  // a Date mirror so `isFutureCell` / `buildMonthSections` can do
+  // local-day comparisons.
+  const todayDate = new Date(today + 'T00:00:00');
 
   // Per-month sections for the current year up to today's month.
   // Each section has its own weeks array; between sections the render
   // path inserts a visual gap so the user can see where one month
   // ends and the next begins.
-  const sections = useMemo(() => buildMonthSections(today), [today]);
+  const sections = useMemo(() => buildMonthSections(todayDate), [today]);
 
   return (
     // The day-of-week gutter is FIXED on the left and does NOT scroll
@@ -157,15 +159,14 @@ function YearGrid({ hobby, COLORS }) {
                 <View key={`row-${rowIdx}`} style={styles.ghRow}>
                   {section.weeks.map((week, colIdx) => {
                     const date = week[rowIdx];
-                    if (!isCellInMonth(date, section.year, section.month)) {
-                      return (
-                        <View
-                          key={`sp-${secIdx}-${colIdx}-${rowIdx}`}
-                          style={styles.ghCellSpacer}
-                        />
-                      );
-                    }
-                    if (isFutureCell(date, today)) {
+                    // Out-of-month or future cells both render as a
+                    // transparent spacer of the same dimensions so the
+                    // row's flex layout keeps the remaining cells in
+                    // their correct column positions.
+                    if (
+                      !isCellInMonth(date, section.year, section.month) ||
+                      isFutureCell(date, todayDate)
+                    ) {
                       return (
                         <View
                           key={`sp-${secIdx}-${colIdx}-${rowIdx}`}
@@ -175,7 +176,7 @@ function YearGrid({ hobby, COLORS }) {
                     }
                     const k = dayKey(date);
                     const isDone = !!(hobby.completions && hobby.completions[k]);
-                    const isToday = k === todayK;
+                    const isToday = k === today;
                     return (
                       <View
                         key={`c-${secIdx}-${colIdx}-${rowIdx}`}
@@ -225,7 +226,7 @@ export default function HobbyDetailScreen() {
     );
   }
 
-  const today = todayKey();
+  const today = state.today;
   const done = !!(hobby.completions && hobby.completions[today]);
   const streak = currentStreak(hobby.completions);
   const longest = longestStreak(hobby.completions);
@@ -318,13 +319,13 @@ export default function HobbyDetailScreen() {
         {/* Weekly chart */}
         <View style={[styles.section, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}>
           <Text style={[styles.sectionTitle, { color: COLORS.text }]}>Past 7 days</Text>
-          <WeekChart hobby={hobby} COLORS={COLORS} />
+          <WeekChart hobby={hobby} COLORS={COLORS} today={state.today} />
         </View>
 
         {/* Year grid */}
         <View style={[styles.section, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}>
           <Text style={[styles.sectionTitle, { color: COLORS.text }]}>All-time history</Text>
-          <YearGrid hobby={hobby} COLORS={COLORS} />
+          <YearGrid hobby={hobby} COLORS={COLORS} today={state.today} />
         </View>
 
         <TouchableOpacity

@@ -7,7 +7,7 @@ This document lists every known issue filed against the ProductivityTracker app.
 | 1 | Streak logic | High | ✅ Completed |
 | 2 | Add/Edit Task — reminders | High | ✅ Completed |
 | 3 | Hobby detail — year history grid | High | ✅ Completed |
-| 4 | Midnight rollover | High | Open |
+| 4 | Midnight rollover | High | ✅ Completed |
 | 5 | Notifications (sound + vibration) | High | Open |
 | 6 | Reminder time input | Medium | Open |
 | 7 | Bottom-tab navigation | Medium | Open |
@@ -137,6 +137,21 @@ Per user feedback, the grid was further restructured to render each month as a s
 
 1. Keep the app open and watch the system clock cross 00:00 local.
 2. Note that the "Today" sections and the streak do not update for up to a minute.
+
+**Status:** ✅ Completed
+
+**Resolution**
+
+A new pure helper module `src/utils/midnight.js` exposes `nextLocalMidnight`, `msUntilNextMidnight`, and `scheduleMidnightLoop` — a self-rearming timer that fires at every local 00:00:00. `AppContext` now:
+
+- Schedules the midnight loop on mount. On every fire it dispatches `TICK_MIDNIGHT` (which bumps `state.today`, sweeps expired tasks) and then calls `recomputeStreak`.
+- Bumps `state.today` so consumers (Dashboard's "Today's hobbies" stats, sorted hobby list, and HobbyRow) re-render against the new day without a manual reload.
+- Stamps a fresh `today` on hydration (a previously persisted `today` from a stale AsyncStorage state would otherwise persist across an app relaunch that happens after midnight).
+- Keeps the AppState `change → active` listener and the 60-second safety-net interval for the foreground-resume case.
+
+The dashboard now reads `state.today` instead of calling `todayKey()` directly, so its day-bound UI flips on the midnight tick.
+
+**Covered by:** `tests/run-midnight-tests.mjs` (22 PASS — `MID-01a..05a`). `tests.md` Section E.
 
 ---
 

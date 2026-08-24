@@ -6,7 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { useApp, todayKey } from '../context/AppContext';
+import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { useTheme, FONTS, RADIUS, SHADOW, SPACING } from '../utils/theme';
 import { currentStreak, lastNDays, dayKey, dayLabel } from '../utils/hobbyStats';
@@ -72,8 +72,7 @@ function HobbiesHeader({ onAdd, COLORS }) {
   );
 }
 
-function HobbyListItem({ hobby, onToggle, onPress, COLORS }) {
-  const today = todayKey();
+function HobbyListItem({ hobby, onToggle, onPress, COLORS, today }) {
   const done = !!(hobby.completions && hobby.completions[today]);
   const streak = currentStreak(hobby.completions);
   const days = lastNDays(7);
@@ -183,14 +182,14 @@ export default function HobbiesScreen() {
   const [reminderDays, setReminderDays] = useState([0, 1, 2, 3, 4, 5, 6]);
 
   const sortedHobbies = useMemo(() => {
-    const today = todayKey();
+    const today = state.today;
     return [...state.hobbies].sort((a, b) => {
       const aDone = a.completions && a.completions[today];
       const bDone = b.completions && b.completions[today];
       if (aDone !== bDone) return aDone ? 1 : -1;
       return a.name.localeCompare(b.name);
     });
-  }, [state.hobbies]);
+  }, [state.hobbies, state.today]);
 
   const handleAdd = () => {
     if (!newName.trim()) {
@@ -218,8 +217,8 @@ export default function HobbiesScreen() {
     toast.success('Hobby created');
   };
 
-  const handleToggle = (id, date) => {
-    toggleHobbyToday(id, date);
+  const handleToggle = (id) => {
+    toggleHobbyToday(id, state.today);
     toast.info('Hobby updated');
   };
 
@@ -234,6 +233,7 @@ export default function HobbiesScreen() {
             onToggle={handleToggle}
             onPress={() => navigation.navigate('HobbyDetail', { hobby: item })}
             COLORS={COLORS}
+            today={state.today}
           />
         )}
         refreshControl={

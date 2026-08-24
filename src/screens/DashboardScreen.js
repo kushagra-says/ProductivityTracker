@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { format, isPast } from 'date-fns';
-import { useApp, todayKey } from '../context/AppContext';
+import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { useTheme, FONTS, RADIUS, SHADOW, SPACING } from '../utils/theme';
 import { relTime } from '../utils/relTime';
@@ -100,8 +100,7 @@ function TaskRow({ task, categories, onComplete, COLORS }) {
   );
 }
 
-function HobbyRow({ hobby, onToggle, COLORS }) {
-  const today = todayKey();
+function HobbyRow({ hobby, onToggle, COLORS, today }) {
   const done = !!(hobby.completions && hobby.completions[today]);
 
   return (
@@ -165,9 +164,9 @@ export default function DashboardScreen() {
       completed: tasks.filter((t) => t.status === 'completed').length,
       active: tasks.filter((t) => t.status === 'pending').length,
       pending,
-      hobbiesToday: state.hobbies.filter((h) => h.completions && h.completions[todayKey()]).length,
+      hobbiesToday: state.hobbies.filter((h) => h.completions && h.completions[state.today]).length,
     };
-  }, [state.tasks, state.hobbies]);
+  }, [state.tasks, state.hobbies, state.today]);
 
   const todayTasks = useMemo(() => {
     return state.tasks
@@ -185,14 +184,14 @@ export default function DashboardScreen() {
   }, [state.tasks]);
 
   const sortedHobbies = useMemo(() => {
-    const today = todayKey();
+    const today = state.today;
     return [...state.hobbies].sort((a, b) => {
       const aDone = a.completions && a.completions[today];
       const bDone = b.completions && b.completions[today];
       if (aDone !== bDone) return aDone ? 1 : -1;
       return a.name.localeCompare(b.name);
     });
-  }, [state.hobbies]);
+  }, [state.hobbies, state.today]);
 
   const completedCount = useCountUp(stats.completed);
   const activeCount = useCountUp(stats.active);
@@ -296,7 +295,7 @@ export default function DashboardScreen() {
             </View>
           ) : (
             sortedHobbies.map((h) => (
-              <HobbyRow key={h.id} hobby={h} onToggle={handleHobbyToggle} COLORS={COLORS} />
+              <HobbyRow key={h.id} hobby={h} onToggle={handleHobbyToggle} COLORS={COLORS} today={state.today} />
             ))
           )}
         </View>
