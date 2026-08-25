@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert,
+  View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,7 +35,7 @@ export default function EditCategoryScreen() {
 
   const handleSave = () => {
     if (!name.trim()) {
-      Alert.alert('Name required', 'Please enter a category name.');
+      toast.error('Please enter a category name.');
       return;
     }
     updateCategory({ ...cat, name: name.trim(), icon, color });

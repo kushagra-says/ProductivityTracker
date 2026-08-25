@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
-  ScrollView, Alert,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -264,24 +264,24 @@ export default function AddTaskScreen() {
   ]);
 
   const handleSubmit = () => {
-    if (!title.trim()) { Alert.alert('Missing title', 'Please enter a task title.'); return; }
+    if (!title.trim()) { toast.error('Please enter a task title.'); return; }
     if (customOn && isPast(customDate)) {
-      Alert.alert('Invalid time', 'Custom reminder must be in the future.'); return;
+      toast.error('Custom reminder must be in the future.'); return;
     }
     // Reminder must also be before the expiry when one is set.
     if (customOn && expiryDate && customDate > expiryDate) {
-      Alert.alert('Invalid time', 'Custom reminder cannot be after the expiry date.'); return;
+      toast.error('Custom reminder cannot be after the expiry date.'); return;
     }
     if (beforeExpiryOn && !expiryDate) {
-      Alert.alert('Missing expiry', 'Set an expiry date to use a before-expiry reminder.'); return;
+      toast.error('Set an expiry date to use a before-expiry reminder.'); return;
     }
     if (beforeExpiryOn && expiryDate) {
       const max = maxBeforeExpiryMinutes(expiryDate);
       if (max == null || beforeExpiryMinutes > max) {
-        Alert.alert('Too soon', 'This expiry is too close for the chosen reminder offset.'); return;
+        toast.error('This expiry is too close for the chosen reminder offset.'); return;
       }
       if (addMinutes(expiryDate, -beforeExpiryMinutes) <= new Date()) {
-        Alert.alert('Too soon', 'This expiry is too close for the chosen reminder offset.'); return;
+        toast.error('This expiry is too close for the chosen reminder offset.'); return;
       }
     }
 
@@ -306,9 +306,7 @@ export default function AddTaskScreen() {
       addTask(task);
       toast.success('Task created');
     }
-    const rootNav = navigation.getParent ? navigation.getParent() : null;
-    if (rootNav && rootNav.navigate) rootNav.navigate('Tasks', { screen: 'TasksList' });
-    else navigation.navigate('Tasks', { screen: 'TasksList' });
+    navigation.goBack();
   };
 
   return (

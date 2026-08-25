@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  TextInput, Alert, Modal, RefreshControl,
+  TextInput, Modal, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -50,7 +50,7 @@ export default function CategoriesScreen() {
 
   const handleAdd = () => {
     if (!newName.trim()) {
-      Alert.alert('Name required', 'Please enter a category name.');
+      toast.error('Please enter a category name.');
       return;
     }
     addCategory({ id: genId(), name: newName.trim(), icon: selectedIcon, color: selectedColor });

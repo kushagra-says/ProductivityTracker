@@ -33,8 +33,10 @@ if (Platform.OS === 'android') {
     sound: 'default',
     enableVibrate: true,
     vibrationPattern: [0, 250, 250, 250],
-    importance: Notifications.AndroidImportance.DEFAULT,
-  }).catch(() => {});
+    importance: Notifications.AndroidImportance.MAX,
+  }).catch((e) => {
+    console.warn('Failed to create notification channel:', e);
+  });
 }
 
 // Helper to decorate a scheduled notification's content with the right

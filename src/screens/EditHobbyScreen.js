@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -91,11 +91,11 @@ export default function EditHobbyScreen() {
 
   const handleSave = () => {
     if (!name.trim()) {
-      Alert.alert('Name required', 'Please enter a hobby name.');
+      toast.error('Please enter a hobby name.');
       return;
     }
     if (reminderOn && reminderDays.length === 0) {
-      Alert.alert('Pick a day', 'Choose at least one day for the reminder.');
+      toast.error('Choose at least one day for the reminder.');
       return;
     }
     const hh = String(reminderTime.getHours()).padStart(2, '0');
