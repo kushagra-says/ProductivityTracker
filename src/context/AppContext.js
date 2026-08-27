@@ -158,6 +158,22 @@ function appReducer(state, action) {
         ),
       };
 
+    case 'REVERT_TASK':
+      // Undo a completion — back to pending, completion timestamp dropped.
+      return {
+        ...state,
+        tasks: state.tasks.map((t) =>
+          t.id === action.payload
+            ? {
+                ...t,
+                status: 'pending',
+                completedAt: null,
+                updatedAt: new Date().toISOString(),
+              }
+            : t,
+        ),
+      };
+
     case 'ADD_CATEGORY':
       return { ...state, categories: [...state.categories, action.payload] };
 
@@ -641,9 +657,21 @@ export function AppProvider({ children }) {
       },
       [rescheduleTaskNotifications],
     ),
-    completeTask: useCallback((id) => {
+    completeTask: useCallback(async (id) => {
       dispatch({ type: 'COMPLETE_TASK', payload: id });
+      // A completed task must not keep ringing later — drop every
+      // notification scheduled for it (custom one-shot, before-expiry,
+      // and the implicit 1hr-before-expiry warning alike).
+      await cancelByPredicate(
+        (n) => n.content?.data?.kind === 'task-reminder' && n.content?.data?.taskId === id,
+      );
     }, []),
+    revertTask: useCallback((task) => {
+      dispatch({ type: 'REVERT_TASK', payload: task.id });
+      // Completion cancelled its notifications; re-schedule whichever
+      // reminder times are still in the future.
+      rescheduleTaskNotifications({ ...task, status: 'pending', completedAt: null });
+    }, [rescheduleTaskNotifications]),
     deleteTask: useCallback(async (id) => {
       dispatch({ type: 'DELETE_TASK', payload: id });
       await cancelByPredicate(

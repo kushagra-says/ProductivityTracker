@@ -35,7 +35,7 @@ function maxDate(...values) {
 }
 
 export default function TasksScreen() {
-  const { state, completeTask, deleteTask } = useApp();
+  const { state, completeTask, revertTask, deleteTask } = useApp();
   const { COLORS } = useTheme();
   const navigation = useNavigation();
   const toast = useToast();
@@ -87,6 +87,11 @@ export default function TasksScreen() {
   const handleComplete = (id) => {
     completeTask(id);
     toast.success('Task completed');
+  };
+
+  const handleUndo = (task) => {
+    revertTask(task);
+    toast.info('Task restored to pending');
   };
 
   const statusConfig = {
@@ -168,13 +173,21 @@ export default function TasksScreen() {
                 <Text style={[styles.actionText, { color: COLORS.success }]}>Complete</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity
-              style={styles.actionBtn}
-              onPress={() => navigation.navigate('AddTask', { task })}
-            >
-              <Ionicons name="create-outline" size={14} color={COLORS.accent} />
-              <Text style={[styles.actionText, { color: COLORS.accent }]}>Edit</Text>
-            </TouchableOpacity>
+            {task.status === 'completed' && (
+              <TouchableOpacity style={styles.actionBtn} onPress={() => handleUndo(task)}>
+                <Ionicons name="arrow-undo-circle" size={14} color={COLORS.accent} />
+                <Text style={[styles.actionText, { color: COLORS.accent }]}>Undo</Text>
+              </TouchableOpacity>
+            )}
+            {task.status !== 'completed' && (
+              <TouchableOpacity
+                style={styles.actionBtn}
+                onPress={() => navigation.navigate('AddTask', { task })}
+              >
+                <Ionicons name="create-outline" size={14} color={COLORS.accent} />
+                <Text style={[styles.actionText, { color: COLORS.accent }]}>Edit</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={styles.actionBtn} onPress={() => handleDelete(task.id)}>
               <Ionicons name="trash-outline" size={14} color={COLORS.danger} />
               <Text style={[styles.actionText, { color: COLORS.danger }]}>Delete</Text>

@@ -43,6 +43,8 @@ export function ToastProvider({ children }) {
     toast: show,
     success: useCallback((m) => show(m, COLORS.success), [show, COLORS.success]),
     danger:  useCallback((m) => show(m, COLORS.danger),  [show, COLORS.danger]),
+    // Alias of danger — the validation call-sites all say `toast.error`.
+    error:   useCallback((m) => show(m, COLORS.danger),  [show, COLORS.danger]),
     info:    useCallback((m) => show(m, COLORS.accent),  [show, COLORS.accent]),
   };
 
@@ -86,6 +88,7 @@ export function useToast() {
       toast: () => {},
       success: () => {},
       danger: () => {},
+      error: () => {},
       info: () => {},
     };
   }

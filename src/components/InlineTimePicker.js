@@ -1,10 +1,15 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { WheelColumn } from './WheelPicker';
 
 /**
- * Custom in-app time picker — two column wheels for hour and minute with
- * -/+ buttons plus quick "AM/PM" toggle. Pure React Native, no system UI.
+ * Custom in-app time picker — two scrollable wheels for hour and minute
+ * plus an AM/PM toggle. Pure React Native, no system UI.
+ *
+ * The hour wheel scrolls 1..12 and the minute wheel scrolls 0..59 in
+ * 1-minute steps — the value that settles in the middle of each wheel is
+ * the selection (Bug 6: replaces the old +/- buttons, which stepped
+ * minutes by 5 and made values like 7 unreachable).
  *
  * Used by:
  *   - hobby reminder UI
@@ -39,38 +44,33 @@ export default function InlineTimePicker({
     onChange(d);
   };
 
-  const bump = (field, delta) => {
-    if (field === 'hour') {
-      // 12-hour wrap inside ±1..±12.
-      let n = (hour12 - 1 + delta + 12) % 12 + 1;
-      apply(n, minute, isPM);
-    } else if (field === 'min') {
-      let n = (minute + delta + 60) % 60;
-      apply(hour12, n, isPM);
-    }
-  };
+  const hourItems = Array.from({ length: 12 }, (_, i) => ({
+    value: i + 1,
+    label: String(i + 1),
+  }));
+  const minuteItems = Array.from({ length: 60 }, (_, i) => ({
+    value: i,
+    label: String(i).padStart(2, '0'),
+  }));
 
   return (
     <View style={[styles.wrap, { backgroundColor: surface, borderColor: border }]}>
-      <TimeWheel
-        label="HOUR"
+      <WheelColumn
+        items={hourItems}
         value={hour12}
-        onMinus={() => bump('hour', -1)}
-        onPlus={() => bump('hour', 1)}
+        onChange={(h) => apply(h, minute, isPM)}
+        width={58}
         accent={accent}
-        surfaceAlt={surfaceAlt}
         text={text}
         textMuted={textMuted}
       />
       <Text style={[styles.colon, { color: textMuted }]}>:</Text>
-      <TimeWheel
-        label="MIN"
+      <WheelColumn
+        items={minuteItems}
         value={minute}
-        pad={2}
-        onMinus={() => bump('min', -5)}
-        onPlus={() => bump('min', 5)}
+        onChange={(m) => apply(hour12, m, isPM)}
+        width={58}
         accent={accent}
-        surfaceAlt={surfaceAlt}
         text={text}
         textMuted={textMuted}
       />
@@ -105,61 +105,23 @@ export default function InlineTimePicker({
   );
 }
 
-function TimeWheel({ label, value, pad = 0, onMinus, onPlus, accent, surfaceAlt, text, textMuted }) {
-  const display = pad > 0 ? String(value).padStart(pad, '0') : String(value);
-  return (
-    <View style={styles.wheel}>
-      <TouchableOpacity
-        style={[styles.wheelBtn, { backgroundColor: surfaceAlt, borderColor: accent + '44' }]}
-        onPress={onPlus}
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-      >
-        <Ionicons name="chevron-up" size={16} color={accent} />
-      </TouchableOpacity>
-      <Text style={[styles.wheelValue, { color: text }]}>{display}</Text>
-      <Text style={[styles.wheelLabel, { color: textMuted }]}>{label}</Text>
-      <TouchableOpacity
-        style={[styles.wheelBtn, { backgroundColor: surfaceAlt, borderColor: accent + '44' }]}
-        onPress={onMinus}
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-      >
-        <Ionicons name="chevron-down" size={16} color={accent} />
-      </TouchableOpacity>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   wrap: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     borderRadius: 12,
     borderWidth: 1,
-    padding: 10,
-    gap: 4,
+    padding: 8,
+    gap: 2,
   },
   colon: {
     fontSize: 26,
     fontWeight: '800',
     marginHorizontal: 2,
-    marginBottom: 18,
+    marginTop: -8,
   },
-  wheel: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 4,
-  },
-  wheelBtn: {
-    width: '100%',
-    paddingVertical: 6,
-    borderRadius: 6,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  wheelValue: { fontSize: 30, fontWeight: '800', letterSpacing: -1 },
-  wheelLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 1, marginBottom: 2 },
-  ampm: { marginLeft: 6, marginBottom: 0, alignItems: 'center' },
+  ampm: { marginLeft: 8, alignItems: 'center' },
   ampmBtn: {
     paddingHorizontal: 12,
     paddingVertical: 8,

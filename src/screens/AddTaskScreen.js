@@ -12,6 +12,7 @@ import { useTheme, FONTS, RADIUS, SHADOW, SPACING } from '../utils/theme';
 import PrimaryButton from '../components/PrimaryButton';
 import InlineTimePicker from '../components/InlineTimePicker';
 import MonthGridCalendar from '../components/MonthGridCalendar';
+import { DurationWheelPicker, DurationWheelLabels } from '../components/WheelPicker';
 import { format, addMinutes, isPast } from 'date-fns';
 import { relTime } from '../utils/relTime';
 import {
@@ -19,12 +20,9 @@ import {
   activeChipLabel,
   isCustomStepperVisible,
   minutesToParts,
-  clampUnitValue,
   partsToMinutes,
   partsWithinMax,
   maxBeforeExpiryMinutes,
-  maxForUnit,
-  UNITS,
 } from '../utils/beforeExpiry';
 
 const genId = () => `task_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -201,9 +199,6 @@ export default function AddTaskScreen() {
   const [beforeExpiryCustomDays,    setBeforeExpiryCustomDays]    = useState(_seedParts.days);
   const [beforeExpiryCustomHours,   setBeforeExpiryCustomHours]   = useState(_seedParts.hours);
   const [beforeExpiryCustomMinutes, setBeforeExpiryCustomMinutes] = useState(_seedParts.minutes);
-  const [beforeExpiryCustomUnit,    setBeforeExpiryCustomUnit]    = useState(
-    _seedParts.days > 0 ? 'days' : _seedParts.hours > 0 ? 'hours' : 'minutes',
-  );
 
   // Distinct boolean so "Custom…" stays selected even when the value
   // matches a preset (e.g. user incremented to 60).
@@ -568,124 +563,33 @@ export default function AddTaskScreen() {
                   })}
                 </View>
 
-                {/* Custom stepper — visible whenever custom mode is on. */}
+                {/* Custom duration — scrollable d/h/m wheels (Bug 6: replaces
+                    the 5-minute-step stepper; every value 0 min .. 7 days is
+                    reachable in 1-minute granularity). The dynamic cap from
+                    time-to-expiry is enforced by the clamp useEffect above. */}
                 {isCustomStepperVisible({
                   minutes: beforeExpiryMinutes,
                   customMode: beforeExpiryCustomMode,
                 }) && (
                   <View style={[styles.customStepper, { backgroundColor: COLORS.surface, borderColor: COLORS.border }]}>
-                    {/* Unit chips: days / hours / minutes. */}
-                    <View style={styles.unitChipRow}>
-                      {UNITS.map((u) => {
-                        const isActive = beforeExpiryCustomUnit === u;
-                        return (
-                          <TouchableOpacity
-                            key={u}
-                            style={[
-                              styles.unitChip,
-                              { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border },
-                              isActive && { backgroundColor: COLORS.danger + '22', borderColor: COLORS.danger },
-                            ]}
-                            onPress={() => setBeforeExpiryCustomUnit(u)}
-                          >
-                            <Text style={[
-                              styles.unitChipText,
-                              { color: COLORS.textMuted },
-                              isActive && { color: COLORS.danger },
-                            ]}>
-                              {u}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-
-                    {/* Stepper row — +/- on the active unit, clamped to its
-                        range AND the dynamic cap from time-to-expiry. */}
-                    <View style={styles.stepperRow}>
-                      <TouchableOpacity
-                        style={[styles.stepperBtn, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}
-                        onPress={() => {
-                          if (beforeExpiryCustomUnit === 'days') {
-                            setBeforeExpiryCustomDays(clampUnitValue(beforeExpiryCustomDays - 1, 'days'));
-                          } else if (beforeExpiryCustomUnit === 'hours') {
-                            setBeforeExpiryCustomHours(clampUnitValue(beforeExpiryCustomHours - 1, 'hours'));
-                          } else {
-                            // minutes step by 5 to stay usable; clamp to [0, 59].
-                            setBeforeExpiryCustomMinutes(clampUnitValue(beforeExpiryCustomMinutes - 5, 'minutes'));
-                          }
-                        }}
-                      >
-                        <Ionicons name="remove" size={16} color={COLORS.danger} />
-                      </TouchableOpacity>
-                      <View style={styles.stepperMid}>
-                        <Text style={[styles.stepperValue, { color: COLORS.text }]}>
-                          {beforeExpiryCustomUnit === 'days'
-                            ? beforeExpiryCustomDays
-                            : beforeExpiryCustomUnit === 'hours'
-                              ? beforeExpiryCustomHours
-                              : beforeExpiryCustomMinutes}
-                        </Text>
-                        <Text style={[styles.stepperUnit, { color: COLORS.textMuted }]}>
-                          {(() => {
-                            const cap = dynamicMaxMinutes;
-                            if (cap == null) {
-                              return beforeExpiryCustomUnit === 'minutes' ? 'minutes (step 5)' : beforeExpiryCustomUnit;
-                            }
-                            const unitMax = maxForUnit(
-                              beforeExpiryCustomUnit,
-                              {
-                                days: beforeExpiryCustomDays,
-                                hours: beforeExpiryCustomHours,
-                                minutes: beforeExpiryCustomMinutes,
-                              },
-                              cap,
-                            );
-                            const label = beforeExpiryCustomUnit === 'minutes' ? 'minutes' : beforeExpiryCustomUnit;
-                            return `${label} · max ${unitMax}`;
-                          })()}
-                        </Text>
-                      </View>
-                      <TouchableOpacity
-                        style={[styles.stepperBtn, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}
-                        onPress={() => {
-                          if (beforeExpiryCustomUnit === 'days') {
-                            const cap = dynamicMaxMinutes ?? 7 * 24 * 60;
-                            const unitMax = maxForUnit('days',
-                              {
-                                days: beforeExpiryCustomDays,
-                                hours: beforeExpiryCustomHours,
-                                minutes: beforeExpiryCustomMinutes,
-                              }, cap);
-                            const next = Math.min(unitMax, beforeExpiryCustomDays + 1);
-                            setBeforeExpiryCustomDays(next);
-                          } else if (beforeExpiryCustomUnit === 'hours') {
-                            const cap = dynamicMaxMinutes ?? 7 * 24 * 60;
-                            const unitMax = maxForUnit('hours',
-                              {
-                                days: beforeExpiryCustomDays,
-                                hours: beforeExpiryCustomHours,
-                                minutes: beforeExpiryCustomMinutes,
-                              }, cap);
-                            const next = Math.min(unitMax, beforeExpiryCustomHours + 1);
-                            setBeforeExpiryCustomHours(next);
-                          } else {
-                            const cap = dynamicMaxMinutes ?? 7 * 24 * 60;
-                            const unitMax = maxForUnit('minutes',
-                              {
-                                days: beforeExpiryCustomDays,
-                                hours: beforeExpiryCustomHours,
-                                minutes: beforeExpiryCustomMinutes,
-                              }, cap);
-                            const step = 5;
-                            const next = Math.min(unitMax, beforeExpiryCustomMinutes + step);
-                            setBeforeExpiryCustomMinutes(next);
-                          }
-                        }}
-                      >
-                        <Ionicons name="add" size={16} color={COLORS.danger} />
-                      </TouchableOpacity>
-                    </View>
+                    <DurationWheelPicker
+                      parts={{
+                        days: beforeExpiryCustomDays,
+                        hours: beforeExpiryCustomHours,
+                        minutes: beforeExpiryCustomMinutes,
+                      }}
+                      onChange={(p) => {
+                        setBeforeExpiryCustomDays(p.days);
+                        setBeforeExpiryCustomHours(p.hours);
+                        setBeforeExpiryCustomMinutes(p.minutes);
+                      }}
+                      accent={COLORS.danger}
+                      surface={COLORS.surfaceAlt}
+                      border={COLORS.border}
+                      text={COLORS.text}
+                      textMuted={COLORS.textMuted}
+                    />
+                    <DurationWheelLabels textMuted={COLORS.textMuted} />
 
                     {/* Summary of the total — shows the d/h/m breakdown + total minutes. */}
                     <Text style={[styles.stepperSummary, { color: COLORS.textMuted }]}>
@@ -822,35 +726,5 @@ const styles = StyleSheet.create({
     padding: 8,
     gap: 8,
   },
-  
-  unitChipRow: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  unitChip: {
-    flex: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
-  unitChipText: { fontSize: 12, fontWeight: '700', textTransform: 'capitalize' },
-  stepperRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  stepperBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepperMid: { flex: 1, alignItems: 'center' },
-  stepperValue: { fontSize: 22, fontWeight: '800' },
-  stepperUnit: { fontSize: 10, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', marginTop: 2 },
   stepperSummary: { fontSize: 11, textAlign: 'center', marginTop: 2 },
 });

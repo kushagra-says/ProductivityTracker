@@ -8,8 +8,8 @@ This document lists every known issue filed against the ProductivityTracker app.
 | 2 | Add/Edit Task — reminders | High | ✅ Completed |
 | 3 | Hobby detail — year history grid | High | ✅ Completed |
 | 4 | Midnight rollover | High | ✅ Completed |
-| 5 | Notifications (sound + vibration) | High | Open |
-| 6 | Reminder time input | Medium | Open |
+| 5 | Notifications (sound + vibration) | High | ✅ Completed |
+| 6 | Reminder time input | Medium | ✅ Completed |
 | 7 | Bottom-tab navigation | Medium | Open |
 | 8 | README / docs | Low | Open |
 | 9 | Add/Edit Task — card interactions | Medium | Open |
@@ -176,6 +176,16 @@ The dashboard now reads `state.today` instead of calling `todayKey()` directly, 
 1. Schedule a reminder for 1 minute in the future.
 2. Wait for it to fire. Observe: notification appears, but no sound, no vibration, on the same device that rings for other apps.
 
+**Status:** ✅ Completed
+
+**Resolution**
+
+`src/context/AppContext.js` now:
+
+- Creates the Android notification channel (`default`) at module load with `importance: MAX`, `sound: 'default'`, `enableVibrate: true`, and an explicit `vibrationPattern: [0, 250, 250, 250]`.
+- The global handler returns `shouldPlaySound: true`, `shouldSetBadge: true`, `shouldShowBanner: true`, `shouldShowList: true`.
+- A `decorate()` helper stamps every scheduled notification's content with `sound: 'default'` plus the Android `channelId`, and is used by every `scheduleNotificationAsync` call site (task reminders, hobby reminders, tasks-reminder, morning briefing, streak nudge).
+
 ---
 
 ## Bug 6 — Custom reminder input restricted to 5-minute steps
@@ -195,6 +205,18 @@ The dashboard now reads `state.today` instead of calling `todayKey()` directly, 
 **Reproduction**
 
 1. New task → Before-expiry → Custom. Try to pick `7` minutes. The picker only offers multiples of 5.
+
+**Status:** ✅ Completed
+
+**Resolution**
+
+- New reusable wheel module `src/components/WheelPicker.js` exposing `WheelColumn` (a vertical snap-scrolling FlatList where the item that settles in the middle IS the selection), `DurationWheelPicker` (three columns: days 0–7, hours 0–23, minutes 0–59), and `DurationWheelLabels`.
+- `src/components/InlineTimePicker.js` was rewritten to render the hour as a scrollable 1–12 wheel and the minute as a scrollable 0–59 wheel in 1-minute steps. The ± buttons are gone; AM/PM stays as separate buttons. All four call sites (AddTaskScreen, EditHobbyScreen, HobbiesScreen, SettingsScreen) pick this up unchanged via the same props.
+- In `src/screens/AddTaskScreen.js` the "Before expiry" custom d/h/m stepper (unit chips + ± row, minute step 5) was removed and replaced with `DurationWheelPicker`, so any value from 0 min up to 7 days is reachable with 1-minute granularity (e.g. 7 minutes). Preset chips, the latched "Custom…" mode, and the dynamic expiry cap clamp (`maxBeforeExpiryMinutes` → `partsWithinMax`) behave as before.
+
+**Follow-up — completed tasks keep ringing**
+
+Tapping complete on a task left its future custom/before-expiry notifications scheduled, so they still fired afterwards. `completeTask` in `AppContext` now cancels every scheduled `task-reminder` for that task id (custom one-shot, before-expiry, and the implicit 1-hour warning alike) at the moment of completion.
 
 ---
 

@@ -30,8 +30,9 @@ TESTS
 [TASK-02]    PASS — explicit preset tap exits custom mode
 [TASK-03]    PASS — saved value is exact
 [TASK-04]    [MANUAL] — validation still blocks past triggers
-[TASK-05]    [MANUAL] — unit chips render d/h/m
-[TASK-06]    [MANUAL] — active unit drives the +/- stepper
+[TASK-04b]   [MANUAL] — empty title shows an error toast (no crash)
+[TASK-05]    [MANUAL] — custom wheels render d/h/m columns
+[TASK-06]    [MANUAL] — scrolling a wheel changes that unit only
 [TASK-07]    [MANUAL] — subtitle reflects d/h/m breakdown
 [TASK-08]    [MANUAL] — preset tap re-seeds the parts
 [TASK-09]    [MANUAL] — before-expiry card hidden when no expiry
@@ -118,6 +119,10 @@ TESTS
 [TIME-01]   PASS — hours scroll 1..12
 [TIME-02]   PASS — minutes scroll 0..59
 [TIME-03]   PASS — AM/PM toggle unaffected
+[TIME-04]   [MANUAL] — wheel selection is the centered row
+[TIME-05]   [MANUAL] — duration wheels range days 0..7 / hrs 0..23 / min 0..59
+[TIME-06]   [MANUAL] — duration wheels allow 1-minute granularity (7 min)
+[TIME-07]   [MANUAL] — duration wheels clamp to the dynamic expiry cap
 
 [GRID-01]   PASS — no future cells rendered
 [GRID-02]   PASS — month label anchored to 1st-of-month column
@@ -148,6 +153,10 @@ TESTS
 [TASK-A01]  PASS — create task with all fields
 [TASK-A02]  PASS — edit task preserves id
 [TASK-A03]  PASS — delete task cancels notifications
+[TASK-A04]  PASS — complete task cancels notifications
+[TASK-A05]  PASS — undo restores pending + future reminders
+[TASK-A06]  [MANUAL] — completed card shows Undo/Delete, no Edit
+[TOAST-01]  [MANUAL] — validation error toast, no crash (task/hobby/category)
 [HOBBY-A01] PASS — create hobby with reminder
 [HOBBY-A02] PASS — toggle hobby for past date
 [HOBBY-A03] PASS — delete hobby cancels notifications
@@ -202,35 +211,40 @@ The `beforeExpiryCustomMode` flag keeps the user in "Custom…" mode even when t
 
 Covered by: `tests/run-before-expiry-tests.mjs` (42 PASS — `TASK-01`..`TASK-07` for the active-chip semantics, `TASK-08-helper`..`TASK-15d-helper` for the helpers), plus the manual smoke below.
 
-### TASK-01 — Custom mode survives stepper to 60
+### TASK-01 — Custom mode survives wheel input to 60
 - **Pre-conditions:** New task screen open; Before-expiry toggle on.
-- **Steps:** Tap `Custom…`. Use the d/h/m stepper to drive the total to `60` (e.g. `hours=1, days=0, minutes=0`).
-- **Expected:** `Custom…` chip remains highlighted. The custom stepper remains visible. `1 hour` chip is not highlighted.
+- **Steps:** Tap `Custom…`. On the d/h/m wheels, set days=0, hours=1, minutes=0.
+- **Expected:** `Custom…` chip remains highlighted. The d/h/m wheels remain visible. `1 hour` chip is not highlighted.
 
 ### TASK-02 — Explicit preset tap exits custom mode
 - **Pre-conditions:** State from TASK-01.
 - **Steps:** Tap `1 hour` chip.
-- **Expected:** `1 hour` chip is highlighted. `Custom…` chip is not. The custom stepper is hidden. `beforeExpiryMinutes === 60`.
+- **Expected:** `1 hour` chip is highlighted. `Custom…` chip is not. The d/h/m wheels are hidden. `beforeExpiryMinutes === 60`.
 
 ### TASK-03 — Saved value is exact
-- **Pre-conditions:** Custom stepper at `47`.
+- **Pre-conditions:** Custom wheels at days=0, hours=0, minutes=47.
 - **Steps:** Save the task; reopen it for edit.
 - **Expected:** `beforeExpiryMinutes === 47`; the `Custom…` chip is highlighted on reopen.
 
 ### TASK-04 — Validation still blocks past triggers **[MANUAL]**
 - **Pre-conditions:** Expiry = now + 30 minutes. Custom at 60.
 - **Steps:** Tap Save.
-- **Expected:** Alert "Too soon — this expiry is too close for the chosen reminder offset." Task is not saved.
+- **Expected:** Red toast "This expiry is too close for the chosen reminder offset." appears; no crash. Task is not saved.
 
-### TASK-05 — Unit chips render d/h/m **[MANUAL]**
+### TASK-04b — Empty title shows an error toast, no crash **[MANUAL]**
+- **Pre-conditions:** New task screen, title empty.
+- **Steps:** Tap `Create task`.
+- **Expected:** Red toast "Please enter a task title." appears; the screen stays open; no crash. (Regression gate for the missing `toast.error` crash — also check the same on Add/Edit hobby and Add/Edit category.)
+
+### TASK-05 — Custom wheels render d/h/m **[MANUAL]**
 - **Pre-conditions:** Before-expiry toggle on. `Custom…` active.
-- **Steps:** Inspect the custom stepper.
-- **Expected:** Three chips labelled `days`, `hours`, `minutes` are visible. Exactly one is highlighted in `COLORS.danger`.
+- **Steps:** Inspect the custom duration picker.
+- **Expected:** Three scrollable wheel columns are visible with `DAYS` / `HRS` / `MIN` labels, each with a highlighted selection band in the middle. No unit chips, no ± buttons.
 
-### TASK-06 — Active unit drives the +/- stepper **[MANUAL]**
-- **Pre-conditions:** State from TASK-05.
-- **Steps:** Tap `hours`. Tap `+` four times. Tap `days`. Tap `−` once. Tap `minutes`. Tap `+` twice.
-- **Expected:** Hours chip active → value changes; days chip active → days value changes; minutes chip active → minutes changes by 5 per tap. Days never exceeds 7, hours never exceeds 23, minutes never exceeds 59. Below 0 clamps to the floor.
+### TASK-06 — Scrolling a wheel changes that unit only **[MANUAL]**
+- **Pre-conditions:** State from TASK-05, parts d/h/m = 0/0/0.
+- **Steps:** Scroll the hours wheel to 4. Then the days wheel to 2. Then the minutes wheel to 7.
+- **Expected:** Parts read 0/4/0, then 2/4/0, then 2/4/7. Days never exceeds 7, hours never exceeds 23, minutes never exceeds 59; the wheels stop at their ends (no wrap-around).
 
 ### TASK-07 — Card subtitle reflects d/h/m breakdown **[MANUAL]**
 - **Pre-conditions:** Days=2, Hours=3, Minutes=15, expiry date set.
@@ -249,13 +263,13 @@ Covered by: `tests/run-before-expiry-tests.mjs` (42 PASS — `TASK-01`..`TASK-07
 
 ### TASK-10 — Dynamic cap reflects time-to-expiry **[MANUAL]**
 - **Pre-conditions:** Expiry set to now + 3 hours.
-- **Steps:** Toggle before-expiry on, tap `Custom…`. Inspect the unit chips and stepper labels.
-- **Expected:** Card subtitle includes "max 180 min". Tapping the `days` chip, then pressing `+` repeatedly — value caps at 0 (since 3 h < 1 day). Tapping the `hours` chip, pressing `+` three times — hours becomes 3 (180 min), then stops.
+- **Steps:** Toggle before-expiry on, tap `Custom…`. Scroll the days wheel up, then the hours wheel.
+- **Expected:** Card subtitle includes "max 180 min". Days cannot exceed 0 (3 h < 1 day) — the parts clamp back so the total stays ≤ 180. Hours caps at 3 (180 min).
 
 ### TASK-11 — Shrinking expiry clamps parts **[MANUAL]**
 - **Pre-conditions:** Expiry = now + 2 days, custom parts = 1 day 5 hours (total 1740 min).
 - **Steps:** Change expiry to now + 3 hours (e.g. via the date picker).
-- **Expected:** Without you touching the chips, d/h/m snap down to 0/3/0 (180 min). The "+" buttons stop at this cap. The card subtitle now reads "max 180 min".
+- **Expected:** Without you touching the wheels, they re-anchor to 0/3/0 (180 min). Scrolling further up cannot exceed the cap. The card subtitle now reads "max 180 min".
 
 ### TASK-13..15d — Pure-helper gates (run-before-expiry-tests.mjs)
 See `tests/run-before-expiry-tests.mjs` for the full assertion list. Every case must report `PASS`.
@@ -264,18 +278,42 @@ See `tests/run-before-expiry-tests.mjs` for the full assertion list. Every case 
 
 ## C. Time picker — scrollable wheel (Bug 6)
 
+The picker is a set of scroll wheels (`src/components/WheelPicker.js`): the row that
+settles in the middle selection band IS the applied value. Wheels are finite —
+they stop at their ends rather than wrapping. Used by the task custom reminder,
+the hobby reminder, the settings times (via `InlineTimePicker`), and the
+before-expiry custom duration (`DurationWheelPicker`).
+
 ### TIME-01 — Hours scroll 1..12
 - **Pre-conditions:** Any time picker (hobby reminder, task custom reminder).
 - **Steps:** Scroll the hour column up and down past 1 and past 12.
-- **Expected:** Visible value cycles 1 → 2 → … → 12 → 1. No value outside 1..12 is reachable.
+- **Expected:** Values outside 1..12 are unreachable; the wheel stops at 1 and at 12 (no wrap-around).
 
 ### TIME-02 — Minutes scroll 0..59
 - **Steps:** Scroll the minute column up and down past 0 and past 59.
-- **Expected:** Visible value cycles 0 → 1 → … → 59 → 0. No value outside 0..59 is reachable.
+- **Expected:** Values outside 0..59 are unreachable; the wheel stops at 0 and at 59. Every single minute (e.g. 7) is reachable — no 5-minute stepping.
 
 ### TIME-03 — AM/PM toggle unaffected
 - **Steps:** With time `3:00 AM`, tap PM.
 - **Expected:** Displayed value becomes `3:00 PM`. The underlying 24-hour `value.getHours()` is `15`.
+
+### TIME-04 — Wheel selection is the centered row **[MANUAL]**
+- **Steps:** Flick a wheel, let it settle. Repeat with a slow drag that ends without momentum.
+- **Expected:** In both cases the bold row inside the selection band is the value applied (check the card subtitle / summary line matches). No +/− buttons are rendered anywhere.
+
+### TIME-05 — Duration wheels range days 0..7 / hrs 0..23 / min 0..59 **[MANUAL]**
+- **Pre-conditions:** New task → Before expiry → Custom….
+- **Steps:** Scroll each of the three duration wheels to both ends.
+- **Expected:** Days stops between 0 and 7, hours between 0 and 23, minutes between 0 and 59. Labels read `N days` / `N hrs` / bare minute numbers.
+
+### TIME-06 — Duration wheels allow 1-minute granularity **[MANUAL]**
+- **Steps:** Set the wheels to days=0, hours=0, minutes=7. Save the task; reopen for edit.
+- **Expected:** The summary reads `Notify 7 min (7 min) before expiry`; on reopen the minute wheel is anchored at 7 and `Custom…` is active. (Regression gate for the old 5-minute-step stepper.)
+
+### TIME-07 — Duration wheels clamp to the dynamic expiry cap **[MANUAL]**
+- **Pre-conditions:** Expiry = now + 45 minutes; custom mode on.
+- **Steps:** Scroll the minutes wheel up to 59.
+- **Expected:** The wheels re-anchor so the total never exceeds the cap (0/0/45 for a 45-min-away expiry). Saving the task succeeds with the clamped value; no "too close" toast appears.
 
 ---
 
@@ -399,6 +437,22 @@ See `tests/run-before-expiry-tests.mjs` for the full assertion list. Every case 
 ### TASK-A03 — Delete task cancels notifications
 - **Steps:** With the task above pending, delete it. Inspect `getAllScheduledNotificationsAsync`.
 - **Expected:** No notifications with `data.taskId === <deleted-id>` remain.
+
+### TASK-A04 — Completing a task cancels its notifications
+- **Steps:** Create a pending task with a future `customReminderTime` (and a before-expiry reminder). Complete it. Inspect `getAllScheduledNotificationsAsync`.
+- **Expected:** No notifications with `data.taskId === <id>` remain — the custom one-shot, the before-expiry reminder, and the implicit 1-hour warning are all gone at the moment of completion.
+
+### TASK-A05 — Undo restores pending status and future reminders
+- **Steps:** Tap `Undo` on the completed task from TASK-A04. Inspect `state.tasks` and `getAllScheduledNotificationsAsync`.
+- **Expected:** Task is `pending` again with `completedAt === null`. Every reminder whose fire time is still in the future is re-scheduled (`data.taskId === <id>` present); fire times already in the past are not scheduled.
+
+### TASK-A06 — Completed card actions are Undo + Delete only **[MANUAL]**
+- **Steps:** Complete a task and inspect its card actions on the Tasks screen.
+- **Expected:** The completed card shows only `Undo` and `Delete` — no `Edit` button. Pending cards still show `Complete`, `Edit`, `Delete`; expired cards keep `Edit`, `Delete`.
+
+### TOAST-01 — Validation errors show a toast, no crash **[MANUAL]**
+- **Steps:** On New task, tap `Create task` with an empty title. Repeat on Add/Edit hobby with an empty name and no reminder days, and on Add/Edit category with an empty name.
+- **Expected:** Each shows a red error toast and stays on the screen; none of them crash. (Regression gate for the missing `toast.error` method.)
 
 ### HOBBY-A01 — Create hobby with reminder
 - **Steps:** Add a hobby. Toggle on a daily reminder for `08:00`. Save.
@@ -542,8 +596,10 @@ Covered by: source-level grep + smoke below.
    node tests/run-streak-tests.mjs
    node tests/run-before-expiry-tests.mjs
    node tests/run-calendar-tests.mjs
+   node tests/run-year-grid-tests.mjs
+   node tests/run-midnight-tests.mjs
    ```
 2. Run the manual checks marked **[MANUAL]**.
-3. Fill the `TESTS` block in the commit message verbatim using the reporting format. The total automated count must equal `18 + 42 + 35 = 95` PASS lines (no FAIL, no PARTIAL).
+3. Fill the `TESTS` block in the commit message verbatim using the reporting format. The total automated count must equal `18 + 42 + 35 + 106 + 22 = 223` PASS lines (no FAIL, no PARTIAL).
 4. The commit is rejected if any line reads `FAIL`. A `PARTIAL` is allowed only with a written justification.
 5. The commit is also rejected if the test count is < the lines listed in the example block — i.e. every test ID in the example must be present in the commit body, even if a single test is `PARTIAL`.
