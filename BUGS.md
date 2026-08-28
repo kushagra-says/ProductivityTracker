@@ -359,3 +359,33 @@ Fixed across two commits:
 Removed the circle (`styles.rateCircle` / `rateCircleInner` / `rateCirclePercent`) and its JSX from the Today hero card. The card now shows only the existing large rate value with its "X of Y done today" subtext and the streak line.
 
 **Covered by:** tests.md INSIGHTS manual check — Today card shows a single percentage.
+
+## Bug 11 — Notifications ring but are not visible, and fire 30–40 s late
+
+**Files:** `src/context/AppContext.js` (notification handler), `app.json` (Android permissions)
+
+**Reported behaviour**
+
+- A reminder fires with its sound, but no notification appears anywhere — not as a heads-up banner while the app is open and not in the system notification list afterwards.
+- The ring arrives 30–40 seconds after the scheduled minute, instead of when the clock ticks over to the preferred time.
+
+**Root causes**
+
+1. *Invisible:* `expo-notifications@0.28` (SDK 51) reads only `shouldShowAlert` from the `setNotificationHandler` response and **defaults it to `false`** (`NotificationsHandler.kt:19`). The handler returned the newer `shouldShowBanner` / `shouldShowList` keys, which this version ignores — so while the app was in the foreground the sound played (`shouldPlaySound` is read) but the notification was never displayed.
+2. *Delayed:* `ExpoSchedulingDelegate.kt:101` uses `setExactAndAllowWhileIdle` only when `AlarmManager.canScheduleExactAlarms()` is true; otherwise it falls back to inexact `setAndAllowWhileIdle`, which the OS batches (tens of seconds typical). `SCHEDULE_EXACT_ALARM` was not declared, so the app never qualified for exact alarms.
+
+**Expected behaviour**
+
+- A notification that fires while the app is open shows as a heads-up banner and lands in the notification list.
+- Reminders ring at the scheduled minute, not tens of seconds after.
+
+**Status:** ✅ Completed
+
+**Resolution**
+
+- Added `shouldShowAlert: true` to the notification handler (the newer banner/list keys kept for forward-compatibility).
+- Added `SCHEDULE_EXACT_ALARM` to `app.json` → `android.permissions`, so standalone builds use exact alarms (auto-granted on Android ≤ 13; on Android 14+ the user grants it once via the system toggle).
+
+**Expo Go caveat:** app.json permissions are not applied inside Expo Go — its own manifest governs. On Android 14+ the "Alarms & reminders" special access must be granted to Expo Go once (Settings → Apps → Expo Go → Alarms & reminders) for exact timing there.
+
+**Covered by:** tests.md NOTIF-04 (visible while app open), NOTIF-05 (fires at the scheduled minute).

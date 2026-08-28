@@ -19,6 +19,14 @@ import { scheduleMidnightLoop } from '../utils/midnight';
 // and the sound goes to the default channel (often mute).
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
+    // expo-notifications 0.28 (SDK 51) reads ONLY `shouldShowAlert` from
+    // this object — and it defaults to false. The newer shouldShowBanner /
+    // shouldShowList keys are silently ignored by this version, so without
+    // shouldShowAlert a notification that fires while the app is open
+    // plays its sound but is never displayed anywhere.
+    shouldShowAlert: true,
+    // Kept for forward-compatibility: newer expo-notifications versions
+    // replace shouldShowAlert with the banner/list pair.
     shouldShowBanner: true,
     shouldShowList: true,
     shouldPlaySound: true,

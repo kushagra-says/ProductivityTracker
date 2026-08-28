@@ -393,6 +393,20 @@ Used by the task custom reminder, the hobby reminder, the settings times (via
 - **Steps:** Schedule a notification for now + 30 s. Wait.
 - **Expected:** Device rings/vibrates. Notification appears in tray.
 
+### NOTIF-04 — Handler shouldShowAlert true (Bug 11)
+- **Steps:** Read the source of `AppContext.js` and confirm the `setNotificationHandler` response includes `shouldShowAlert: true` alongside `shouldPlaySound: true`.
+- **Expected:** Present and true — expo-notifications 0.28 defaults `shouldShowAlert` to false, which suppressed all foreground presentation while the sound still played.
+
+### NOTIF-05 — Visible while the app is open (Bug 11) **[MANUAL]**
+- **Pre-conditions:** App open on any tab, notifications permitted.
+- **Steps:** Schedule a notification for now + 1 min. Keep the app in the foreground and watch.
+- **Expected:** A heads-up banner appears over the app at the scheduled moment, and the notification is present in the system notification list afterwards.
+
+### NOTIF-06 — Fires at the scheduled minute (Bug 11) **[MANUAL]**
+- **Pre-conditions:** Android 12+. On Android 14+, "Alarms & reminders" is granted to the app (or to Expo Go when running there).
+- **Steps:** Set a daily reminder one minute ahead. Watch the device clock tick to the preferred time.
+- **Expected:** The ring lands within a second or two of the minute — not 30–40 s later.
+
 ---
 
 ## G. Swipe between tabs (Bug 7)
