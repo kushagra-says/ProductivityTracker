@@ -65,6 +65,16 @@ TESTS
 [TASK-15b-helper] PASS — maxForUnit hard-caps minutes at 59
 [TASK-15c-helper] PASS — maxForUnit floors days at 0 below 1440
 [TASK-15d-helper] PASS — maxForUnit hard-caps hours at 23
+[TASK-16]         PASS — formatDuration(0) → "0 min"
+[TASK-16b-helper] PASS — formatDuration(7) → "7 min"
+[TASK-16c-helper] PASS — formatDuration(59) → "59 min"
+[TASK-16d-helper] PASS — formatDuration(60) → "1 hour"
+[TASK-16e-helper] PASS — formatDuration(90) → "1 hour 30 min"
+[TASK-16e2-helper] PASS — formatDuration(180) → "3 hours"
+[TASK-16f-helper] PASS — formatDuration(1500) → "1 day 1 hour"
+[TASK-16g-helper] PASS — formatDuration(8775) → full d/h/m
+[TASK-16h-helper] PASS — formatDuration(1440) → "1 day"
+[TASK-16i-helper] PASS — dynamic cap formats as d/h/m
 
 [CAL-01]    PASS — WEEKDAY_LABELS is Mon-first
 [CAL-02]    PASS — MONTH_SHORT is the canonical 12
@@ -140,6 +150,19 @@ TESTS
 [SWIPE-02]  PASS — vertical scroll does not change tab
 [SWIPE-03]  PASS — short swipe is ignored
 [SWIPE-04]  PASS — swipe disabled in stack screens
+[SWIPE-05]  [MANUAL] — static snapshot of adjacent page slides in during drag; page springs back if swipe incomplete
+[SWIPE-06]  [MANUAL] — swipe unavailable while a task/category is being created or edited
+[SWIPE-07]  [MANUAL] — swipe past outer edges does nothing, no white background
+
+[BACK-01]   [MANUAL] — system back on a tab list returns to Dashboard
+[BACK-02]   [MANUAL] — system back on Dashboard pops "Leave the app?" dialog
+[BACK-03]   [MANUAL] — deeper screens (forms/settings) keep default pop
+
+[UNSAVED-01] [MANUAL] — back with unsaved task edits pops "Discard changes?" dialog
+[UNSAVED-02] [MANUAL] — Keep editing stays on screen; Discard leaves and loses changes
+[UNSAVED-03] [MANUAL] — saving then back does NOT pop the dialog (task/hobby/category)
+[UNSAVED-04] [MANUAL] — back with NO edits navigates immediately, no dialog
+[UNSAVED-05] [MANUAL] — editing every field back to its original value → back is immediate, no dialog
 
 [THEME-01]  PASS — dark/cream toggle persists
 [THEME-02]  PASS — accent picker persists per theme
@@ -209,7 +232,7 @@ Covered by: `tests/run-streak-tests.mjs` (18 PASS), plus the manual smoke below.
 
 The `beforeExpiryCustomMode` flag keeps the user in "Custom…" mode even when the picked minutes happen to coincide with a preset. The d/h/m unit picker splits the offset into days + hours + minutes; total minutes is recomputed via `partsToMinutes` whenever the user is in custom mode.
 
-Covered by: `tests/run-before-expiry-tests.mjs` (42 PASS — `TASK-01`..`TASK-07` for the active-chip semantics, `TASK-08-helper`..`TASK-15d-helper` for the helpers), plus the manual smoke below.
+Covered by: `tests/run-before-expiry-tests.mjs` (52 PASS — `TASK-01`..`TASK-07` for the active-chip semantics, `TASK-08-helper`..`TASK-15d-helper` for the helpers, `TASK-16`..`TASK-16i` for `formatDuration`), plus the manual smoke below.
 
 ### TASK-01 — Custom mode survives wheel input to 60
 - **Pre-conditions:** New task screen open; Before-expiry toggle on.
@@ -244,12 +267,12 @@ Covered by: `tests/run-before-expiry-tests.mjs` (42 PASS — `TASK-01`..`TASK-07
 ### TASK-06 — Scrolling a wheel changes that unit only **[MANUAL]**
 - **Pre-conditions:** State from TASK-05, parts d/h/m = 0/0/0.
 - **Steps:** Scroll the hours wheel to 4. Then the days wheel to 2. Then the minutes wheel to 7.
-- **Expected:** Parts read 0/4/0, then 2/4/0, then 2/4/7. Days never exceeds 7, hours never exceeds 23, minutes never exceeds 59; the wheels stop at their ends (no wrap-around).
+- **Expected:** Parts read 0/4/0, then 2/4/0, then 2/4/7. Days never exceeds 7, hours never exceeds 23, minutes never exceeds 59; each wheel loops at its own ends instead of stopping.
 
 ### TASK-07 — Card subtitle reflects d/h/m breakdown **[MANUAL]**
 - **Pre-conditions:** Days=2, Hours=3, Minutes=15, expiry date set.
 - **Steps:** Look at the card subtitle.
-- **Expected:** Subtitle reads `Notify 2 days 3 hours 15 min (8775 min) before expiry`. The `(8775 min)` is the total the app will use for `addMinutes(expiryDate, -beforeExpiryMinutes)`.
+- **Expected:** Subtitle reads `Notify 2 days 3 hours 15 min before expiry`. No raw minute total is shown anywhere on the card.
 
 ### TASK-08 — Preset tap re-seeds the parts **[MANUAL]**
 - **Pre-conditions:** Custom mode active, current parts d/h/m = 2/3/15.
@@ -264,12 +287,12 @@ Covered by: `tests/run-before-expiry-tests.mjs` (42 PASS — `TASK-01`..`TASK-07
 ### TASK-10 — Dynamic cap reflects time-to-expiry **[MANUAL]**
 - **Pre-conditions:** Expiry set to now + 3 hours.
 - **Steps:** Toggle before-expiry on, tap `Custom…`. Scroll the days wheel up, then the hours wheel.
-- **Expected:** Card subtitle includes "max 180 min". Days cannot exceed 0 (3 h < 1 day) — the parts clamp back so the total stays ≤ 180. Hours caps at 3 (180 min).
+- **Expected:** Card subtitle includes "max 3 hours" (d/h/m, no raw minute total). Days cannot exceed 0 (3 h < 1 day) — the parts clamp back so the total stays ≤ 180. Hours caps at 3 (180 min).
 
 ### TASK-11 — Shrinking expiry clamps parts **[MANUAL]**
 - **Pre-conditions:** Expiry = now + 2 days, custom parts = 1 day 5 hours (total 1740 min).
 - **Steps:** Change expiry to now + 3 hours (e.g. via the date picker).
-- **Expected:** Without you touching the wheels, they re-anchor to 0/3/0 (180 min). Scrolling further up cannot exceed the cap. The card subtitle now reads "max 180 min".
+- **Expected:** Without you touching the wheels, they re-anchor to 0/3/0. Scrolling further up cannot exceed the cap. The card subtitle now reads "max 3 hours".
 
 ### TASK-13..15d — Pure-helper gates (run-before-expiry-tests.mjs)
 See `tests/run-before-expiry-tests.mjs` for the full assertion list. Every case must report `PASS`.
@@ -279,19 +302,19 @@ See `tests/run-before-expiry-tests.mjs` for the full assertion list. Every case 
 ## C. Time picker — scrollable wheel (Bug 6)
 
 The picker is a set of scroll wheels (`src/components/WheelPicker.js`): the row that
-settles in the middle selection band IS the applied value. Wheels are finite —
-they stop at their ends rather than wrapping. Used by the task custom reminder,
-the hobby reminder, the settings times (via `InlineTimePicker`), and the
-before-expiry custom duration (`DurationWheelPicker`).
+settles in the middle selection band IS the applied value. Wheels LOOP — scrolling
+past the last item wraps around to the first (and vice versa), like a rotary dial.
+Used by the task custom reminder, the hobby reminder, the settings times (via
+`InlineTimePicker`), and the before-expiry custom duration (`DurationWheelPicker`).
 
 ### TIME-01 — Hours scroll 1..12
 - **Pre-conditions:** Any time picker (hobby reminder, task custom reminder).
-- **Steps:** Scroll the hour column up and down past 1 and past 12.
-- **Expected:** Values outside 1..12 are unreachable; the wheel stops at 1 and at 12 (no wrap-around).
+- **Steps:** Scroll the hour column past 12, then past 1.
+- **Expected:** The wheel wraps — scrolling past 12 shows 1 again, scrolling back past 1 shows 12. Only values 1..12 are ever applied.
 
 ### TIME-02 — Minutes scroll 0..59
-- **Steps:** Scroll the minute column up and down past 0 and past 59.
-- **Expected:** Values outside 0..59 are unreachable; the wheel stops at 0 and at 59. Every single minute (e.g. 7) is reachable — no 5-minute stepping.
+- **Steps:** Scroll the minute column past 59, then past 0.
+- **Expected:** The wheel wraps — past 59 comes 00 again, past 00 comes 59. Every single minute (e.g. 7) is reachable — no 5-minute stepping.
 
 ### TIME-03 — AM/PM toggle unaffected
 - **Steps:** With time `3:00 AM`, tap PM.
@@ -304,11 +327,11 @@ before-expiry custom duration (`DurationWheelPicker`).
 ### TIME-05 — Duration wheels range days 0..7 / hrs 0..23 / min 0..59 **[MANUAL]**
 - **Pre-conditions:** New task → Before expiry → Custom….
 - **Steps:** Scroll each of the three duration wheels to both ends.
-- **Expected:** Days stops between 0 and 7, hours between 0 and 23, minutes between 0 and 59. Labels read `N days` / `N hrs` / bare minute numbers.
+- **Expected:** Days stays within 0 and 7, hours within 0 and 23, minutes within 0 and 59 (each wheel loops at its own ends). All three columns show bare numbers only — the units live in the `DAYS` / `HRS` / `MIN` header row below the wheels.
 
 ### TIME-06 — Duration wheels allow 1-minute granularity **[MANUAL]**
 - **Steps:** Set the wheels to days=0, hours=0, minutes=7. Save the task; reopen for edit.
-- **Expected:** The summary reads `Notify 7 min (7 min) before expiry`; on reopen the minute wheel is anchored at 7 and `Custom…` is active. (Regression gate for the old 5-minute-step stepper.)
+- **Expected:** The summary reads `Notify 7 min before expiry`; on reopen the minute wheel is anchored at 7 and `Custom…` is active. (Regression gate for the old 5-minute-step stepper.)
 
 ### TIME-07 — Duration wheels clamp to the dynamic expiry cap **[MANUAL]**
 - **Pre-conditions:** Expiry = now + 45 minutes; custom mode on.
@@ -376,7 +399,7 @@ before-expiry custom duration (`DurationWheelPicker`).
 
 ### SWIPE-01 — Horizontal swipe changes tab
 - **Pre-conditions:** Dashboard tab is active.
-- **Steps:** Swipe left across ≥ 60% of the screen width with < 40 px of vertical drift.
+- **Steps:** Swipe left across ≥ 40% of the screen width with < 40 px of vertical drift.
 - **Expected:** Tasks tab becomes active.
 
 ### SWIPE-02 — Vertical scroll does not change tab
@@ -385,13 +408,52 @@ before-expiry custom duration (`DurationWheelPicker`).
 - **Expected:** Tab does not change.
 
 ### SWIPE-03 — Short swipe is ignored
-- **Steps:** Swipe left across 20% of the screen width.
+- **Steps:** Swipe left across 12% of the screen width.
 - **Expected:** Tab does not change.
 
 ### SWIPE-04 — Swipe disabled in stack screens
 - **Pre-conditions:** On AddTask (a stack screen inside the Tasks tab).
 - **Steps:** Swipe left across 80% of the screen width.
 - **Expected:** Tab does not change.
+
+### SWIPE-05 — Static adjacent-page snapshot and spring back **[MANUAL]**
+- **Pre-conditions:** Any tab is active; wait ~2–3 s after launch (background snapshot capture of all tabs). Revisit swipes must NOT need this wait — the snapshot cache persists across tab switches.
+- **Steps:** Slowly drag the page left, watching the screen; release halfway without passing the threshold. Then repeat with a full swipe past ~35%. Also: switch to another tab, come back, and swipe again immediately.
+- **Expected:** While dragging, the current page slides with the finger and a cached STATIC SNAPSHOT of the adjacent tab slides in over it from the swipe edge, so the pages look physically adjacent. The gesture stays smooth — no screen mounts mid-swipe — and the preview appears INSTANTLY on revisit swipes (no label fallback flashing mid-swipe; the label only appears in the first seconds after launch, or right after a data/theme change while the background re-capture runs). After completing or editing a task/hobby, the affected previews refresh within a couple of seconds. The preview is read-only — it can't be tapped or scrolled. Releasing short: the page springs back to place, no tab change. Passing the threshold: the page glides off-screen with an eased animation as the preview expands to cover the screen, then the tab switches seamlessly underneath — no hard cut.
+
+### SWIPE-06 — Swipe unavailable during create/edit **[MANUAL]**
+- **Pre-conditions:** On AddTask (creating a task), then on Edit Hobby, then on Edit Category.
+- **Steps:** Swipe left/right across most of the screen.
+- **Expected:** The tab never switches — the screen only rubber-bands. The gesture must not be able to navigate away while creating or editing.
+
+### SWIPE-07 — Outer-edge swipes are not possible **[MANUAL]**
+- **Pre-conditions:** On the Dashboard tab, then on the Insights tab.
+- **Steps:** On Dashboard, swipe right (there is no tab before Home). On Insights, swipe left (there is no tab after Insights).
+- **Expected:** The page does not move at all — no preview, no motion — and the background stays the themed app background (no white flash).
+
+---
+
+## G2. Android system back (Bug 7 follow-up)
+
+The device back gesture (edge swipe / back button) is intercepted at the app
+root: tab lists go back to Dashboard first, and only the Dashboard asks to
+leave. Deeper screens keep the default pop so the unsaved-changes guard
+still governs them.
+
+### BACK-01 — System back on a tab list returns to Dashboard **[MANUAL]**
+- **Pre-conditions:** On Tasks / Categories / Hobbies / Insights (list level).
+- **Steps:** Make the system back gesture (edge swipe or back button).
+- **Expected:** The Dashboard tab becomes active. The app does not exit.
+
+### BACK-02 — System back on Dashboard asks to leave **[MANUAL]**
+- **Pre-conditions:** On the Dashboard tab.
+- **Steps:** Make the system back gesture. Then tap *Exit*, and re-open the app from the device's app selector.
+- **Expected:** A "Leave the app?" dialog appears. *Exit* closes the app, and re-opening the app afterwards starts clean — no dialog is showing. Cancel (or tapping outside) keeps the app open.
+
+### BACK-03 — Deeper screens keep default back **[MANUAL]**
+- **Pre-conditions:** AddTask, EditHobby, EditCategory, or Settings open.
+- **Steps:** Make the system back gesture.
+- **Expected:** The screen pops as usual (with the unsaved-changes dialog if a form is dirty). The app does not jump to the Dashboard.
 
 ---
 
@@ -523,6 +585,34 @@ The Start/Expiry date cards and the two reminder cards (Custom reminder, Before 
 
 ---
 
+## K. Unsaved-changes guard (Add/Edit Task, Edit Hobby, Edit Category)
+
+Every mutating screen is backed by `src/hooks/useUnsavedGuard.js`: field changes
+mark the screen dirty, and back navigation (header back or hardware back) is
+intercepted by `beforeRemove` with a themed `ConfirmDialog`.
+
+### UNSAVED-01 — Back with unsaved edits pops the dialog **[MANUAL]**
+- **Steps:** On New task, change the title (or any field), then tap the back arrow. Repeat on Edit Hobby and Edit Category.
+- **Expected:** A "Discard changes?" dialog appears with *Keep editing* / *Discard*. The screen does NOT navigate back.
+
+### UNSAVED-02 — Keep editing / Discard behave **[MANUAL]**
+- **Steps:** From UNSAVED-01, tap *Keep editing*. Then go back again and tap *Discard*.
+- **Expected:** *Keep editing* closes the dialog and stays on the screen with all edits intact. *Discard* navigates back and the changes are lost (reopening shows the original values).
+
+### UNSAVED-03 — Saving does not pop the dialog **[MANUAL]**
+- **Steps:** On each of the three screens, make changes and tap Save. Then tap back.
+- **Expected:** The save navigates back immediately — no dialog appears (the guard is cleared before `goBack()` in each save handler).
+
+### UNSAVED-04 — Back with no edits navigates immediately **[MANUAL]**
+- **Steps:** On New task, tap back WITHOUT touching anything.
+- **Expected:** No dialog — back works immediately. (Only real edits arm the guard.)
+
+### UNSAVED-05 — Reverting edits is not dirty **[MANUAL]**
+- **Steps:** On Edit task, change the title and priority, then type the title back and set the original priority. Do the same on Edit Hobby (e.g. toggle the reminder off then on again) and Edit Category. Then tap back.
+- **Expected:** Back navigates immediately — no dialog. (Regression gate: dirty is a comparison against the initial values, not a change counter.)
+
+---
+
 ## J. Inline month-grid calendar (Bug — calendar UX)
 
 Replaces the old pill + Today / +1wk / -1wk picker. Used by both the Expiry card and the Custom reminder card. Mon-first, 7 columns × 6 rows, with prev/next-month chevrons. Disabled cells render greyed-out and are non-interactive.
@@ -600,6 +690,6 @@ Covered by: source-level grep + smoke below.
    node tests/run-midnight-tests.mjs
    ```
 2. Run the manual checks marked **[MANUAL]**.
-3. Fill the `TESTS` block in the commit message verbatim using the reporting format. The total automated count must equal `18 + 42 + 35 + 106 + 22 = 223` PASS lines (no FAIL, no PARTIAL).
+3. Fill the `TESTS` block in the commit message verbatim using the reporting format. The total automated count must equal `18 + 52 + 35 + 106 + 22 = 233` PASS lines (no FAIL, no PARTIAL).
 4. The commit is rejected if any line reads `FAIL`. A `PARTIAL` is allowed only with a written justification.
 5. The commit is also rejected if the test count is < the lines listed in the example block — i.e. every test ID in the example must be present in the commit body, even if a single test is `PARTIAL`.

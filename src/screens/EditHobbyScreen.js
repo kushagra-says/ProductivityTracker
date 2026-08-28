@@ -9,6 +9,8 @@ import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { useTheme, FONTS, RADIUS, SHADOW, SPACING } from '../utils/theme';
 import InlineTimePicker from '../components/InlineTimePicker';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { useUnsavedGuard } from '../hooks/useUnsavedGuard';
 
 const ICONS = [
   'barbell-outline', 'book-outline', 'brush-outline', 'leaf-outline',
@@ -81,6 +83,20 @@ export default function EditHobbyScreen() {
       : [0, 1, 2, 3, 4, 5, 6],
   );
 
+  // "Go back without saving?" — the guard snapshots this draft on first
+  // render; editing a field and then manually reverting it is NOT dirty.
+  // Date → timestamp and the days array → a joined string so the
+  // snapshot is JSON-stable.
+  const draft = {
+    name,
+    icon,
+    color,
+    reminderOn,
+    reminderTime: reminderTime.getTime(),
+    reminderDays: reminderDays.join(','),
+  };
+  const guard = useUnsavedGuard(draft);
+
   if (!hobby) {
     return (
       <SafeAreaView style={[styles.safe, { backgroundColor: COLORS.bg }]}>
@@ -109,6 +125,7 @@ export default function EditHobbyScreen() {
       reminderDays:  reminderOn ? reminderDays.slice() : null,
     });
     toast.success('Hobby updated');
+    guard.clearDirty();
     navigation.goBack();
   };
 
@@ -272,6 +289,17 @@ export default function EditHobbyScreen() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      <ConfirmDialog
+        visible={guard.confirmVisible}
+        title="Discard changes?"
+        message="You have unsaved changes. Going back now will lose them."
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        destructive
+        onConfirm={guard.discard}
+        onCancel={guard.keepEditing}
+      />
     </SafeAreaView>
   );
 }

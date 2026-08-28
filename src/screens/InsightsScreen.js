@@ -262,13 +262,6 @@ export default function InsightsScreen() {
               </Text>
             </View>
           </View>
-          <View style={styles.rateCircle}>
-            <View style={[styles.rateCircleInner, { borderColor: COLORS.accent }]}>
-              <Text style={[styles.rateCirclePercent, { color: COLORS.accent }]}>
-                {`${animatedRate}%`}
-              </Text>
-            </View>
-          </View>
         </View>
 
         {/* Stats summary */}
@@ -450,9 +443,6 @@ const styles = StyleSheet.create({
   rateSubtext:     { fontSize: 12, marginTop: 4 },
   streakInfo:      { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 10 },
   streakInfoText:  { fontSize: 13, fontWeight: '700' },
-  rateCircle:      { alignItems: 'center', justifyContent: 'center' },
-  rateCircleInner: { width: 80, height: 80, borderRadius: 40, borderWidth: 5, alignItems: 'center', justifyContent: 'center' },
-  rateCirclePercent: { ...FONTS.heading, fontSize: 22, textAlign: 'center' },
 
   chartCard:  { borderRadius: RADIUS.lg, padding: SPACING.lg, borderWidth: 1, marginBottom: SPACING.lg },
   chartTitle: { ...FONTS.subheading, fontSize: 15, marginBottom: SPACING.md },

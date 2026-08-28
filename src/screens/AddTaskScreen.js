@@ -12,6 +12,8 @@ import { useTheme, FONTS, RADIUS, SHADOW, SPACING } from '../utils/theme';
 import PrimaryButton from '../components/PrimaryButton';
 import InlineTimePicker from '../components/InlineTimePicker';
 import MonthGridCalendar from '../components/MonthGridCalendar';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { useUnsavedGuard } from '../hooks/useUnsavedGuard';
 import { DurationWheelPicker, DurationWheelLabels } from '../components/WheelPicker';
 import { format, addMinutes, isPast } from 'date-fns';
 import { relTime } from '../utils/relTime';
@@ -23,6 +25,7 @@ import {
   partsToMinutes,
   partsWithinMax,
   maxBeforeExpiryMinutes,
+  formatDuration,
 } from '../utils/beforeExpiry';
 
 const genId = () => `task_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -208,6 +211,24 @@ export default function AddTaskScreen() {
       !BEFORE_EXPIRY_PRESETS.some((p) => p.minutes === v);
   });
 
+  // "Go back without saving?" — the guard snapshots this draft on first
+  // render and flags the form dirty only while the live values differ
+  // from it, so a field edited and then manually reverted does NOT
+  // trigger the discard prompt. Dates → timestamps so the snapshot is
+  // JSON-stable.
+  const draft = {
+    title,
+    notes,
+    categoryId,
+    priority,
+    expiryDate: expiryDate ? expiryDate.getTime() : null,
+    customOn,
+    customDate: customDate ? customDate.getTime() : null,
+    beforeExpiryOn,
+    beforeExpiryMinutes,
+  };
+  const guard = useUnsavedGuard(draft);
+
   // While in custom mode, keep `beforeExpiryMinutes` in sync with the
   // d/h/m sum. While in preset mode (not custom), keep the d/h/m parts
   // mirrored from the active preset so a later "Custom…" tap picks up
@@ -301,6 +322,7 @@ export default function AddTaskScreen() {
       addTask(task);
       toast.success('Task created');
     }
+    guard.clearDirty();
     navigation.goBack();
   };
 
@@ -494,18 +516,15 @@ export default function AddTaskScreen() {
                   {(() => {
                     if (!beforeExpiryOn) return 'Tap to enable — fires before the task expires';
                     if (!expiryDate)    return 'Set an expiry date to use this';
-                    const d = beforeExpiryCustomDays;
-                    const h = beforeExpiryCustomHours;
-                    const m = beforeExpiryCustomMinutes;
-                    const parts = [];
-                    if (d) parts.push(`${d} day${d === 1 ? '' : 's'}`);
-                    if (h) parts.push(`${h} hour${h === 1 ? '' : 's'}`);
-                    if (m) parts.push(`${m} min`);
-                    const breakdown = parts.length ? parts.join(' ') : '0 min';
+                    const breakdown = formatDuration(partsToMinutes({
+                      days: beforeExpiryCustomDays,
+                      hours: beforeExpiryCustomHours,
+                      minutes: beforeExpiryCustomMinutes,
+                    }));
                     const cap = dynamicMaxMinutes;
                     return cap
-                      ? `Notify ${breakdown} (${beforeExpiryMinutes} min) before expiry — max ${cap} min`
-                      : `Notify ${breakdown} (${beforeExpiryMinutes} min) before expiry`;
+                      ? `Notify ${breakdown} before expiry — max ${formatDuration(cap)}`
+                      : `Notify ${breakdown} before expiry`;
                   })()}
                 </Text>
               </View>
@@ -591,19 +610,10 @@ export default function AddTaskScreen() {
                     />
                     <DurationWheelLabels textMuted={COLORS.textMuted} />
 
-                    {/* Summary of the total — shows the d/h/m breakdown + total minutes. */}
+                    {/* Summary of the total — d/h/m breakdown only, no raw
+                        minute total. */}
                     <Text style={[styles.stepperSummary, { color: COLORS.textMuted }]}>
-                      {(() => {
-                        const d = beforeExpiryCustomDays;
-                        const h = beforeExpiryCustomHours;
-                        const m = beforeExpiryCustomMinutes;
-                        const parts = [];
-                        if (d) parts.push(`${d} day${d === 1 ? '' : 's'}`);
-                        if (h) parts.push(`${h} hour${h === 1 ? '' : 's'}`);
-                        if (m) parts.push(`${m} min`);
-                        const breakdown = parts.length ? parts.join(' ') : '0 min';
-                        return `Notify ${breakdown} (${beforeExpiryMinutes} min) before expiry`;
-                      })()}
+                      {`Notify ${formatDuration(beforeExpiryMinutes)} before expiry`}
                     </Text>
                   </View>
                 )}
@@ -631,6 +641,17 @@ export default function AddTaskScreen() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      <ConfirmDialog
+        visible={guard.confirmVisible}
+        title="Discard changes?"
+        message="You have unsaved changes. Going back now will lose them."
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        destructive
+        onConfirm={guard.discard}
+        onCancel={guard.keepEditing}
+      />
     </SafeAreaView>
   );
 }

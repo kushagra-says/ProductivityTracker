@@ -18,6 +18,7 @@ import {
   partsWithinMax,
   maxBeforeExpiryMinutes,
   maxForUnit,
+  formatDuration,
   MAX_BEFORE_EXPIRY_MINUTES,
   UNITS,
 } from '../src/utils/beforeExpiry.js';
@@ -200,6 +201,25 @@ expect('TASK-14d', partsWithinMax(0),    { days: 0, hours: 0,  minutes: 0 },
   // max = 2880 min = 2 days, days picked 1 → hours left = floor(1440/60) = 24, capped at 23.
   const h = maxForUnit('hours', { days: 1, hours: 0, minutes: 0 }, 2880);
   expect('TASK-15d', h, 23, 'maxForUnit("hours", {1,0,0}, 2880) → 23');
+}
+
+// ─── TASK-16 — formatDuration renders minutes as d/h/m ───────────────────
+// The before-expiry card shows caps and breakdowns in d/h/m, never as a
+// raw minute total (e.g. "max 3 hours 30 min", not "max 210 min").
+{
+  expect('TASK-16',   formatDuration(0),    '0 min',           'formatDuration(0) → "0 min"');
+  expect('TASK-16b',  formatDuration(7),    '7 min',           'formatDuration(7) → "7 min"');
+  expect('TASK-16c',  formatDuration(59),   '59 min',          'formatDuration(59) → "59 min"');
+  expect('TASK-16d',  formatDuration(60),   '1 hour',          'formatDuration(60) → "1 hour"');
+  expect('TASK-16e',  formatDuration(90),   '1 hour 30 min',   'formatDuration(90) → "1 hour 30 min"');
+  expect('TASK-16e2', formatDuration(180),  '3 hours',         'formatDuration(180) → "3 hours"');
+  expect('TASK-16f',  formatDuration(1500), '1 day 1 hour',    'formatDuration(1500) → "1 day 1 hour"');
+  expect('TASK-16g',  formatDuration(8775), '6 days 2 hours 15 min', 'formatDuration(8775) → full d/h/m');
+  expect('TASK-16h',  formatDuration(1440), '1 day',           'formatDuration(1440) → "1 day" (no zero units)');
+  // Dynamic cap from maxBeforeExpiryMinutes must be presentable as d/h/m.
+  const expiry = new Date(Date.now() + 210 * 60000); // now + 3h30m
+  const cap = maxBeforeExpiryMinutes(expiry);
+  expect('TASK-16i',  formatDuration(cap), '3 hours 30 min', 'cap for now+3h30m formats as "3 hours 30 min"');
 }
 
 // ─── Report ──────────────────────────────────────────────────────────────

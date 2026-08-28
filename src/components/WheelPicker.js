@@ -8,6 +8,12 @@ import { View, Text, ScrollView, StyleSheet, Dimensions } from 'react-native';
  * settles in the middle of the wheel IS the selection — no +/- buttons,
  * no fixed step: every value in `items` is reachable by scrolling.
  *
+ * By default the wheel LOOPS: scrolling past the last item wraps around
+ * to the first (and vice versa), like a rotary dial. The items array is
+ * rendered several times; the scroll offset is re-anchored into the
+ * middle copy after every settle, so the wheel never hits an end.
+ * Pass `loop={false}` for a finite list.
+ *
  * Used by:
  *   - InlineTimePicker (hour / minute wheels)
  *   - DurationWheelPicker (before-expiry d/h/m wheels)
@@ -28,7 +34,8 @@ const SCREEN_W = Dimensions.get('window').width;
  *   items    — array of { value, label } in scroll order.
  *   value    — currently selected value (must exist in items).
  *   onChange — called with the newly selected value once the wheel settles.
- *   width    — flex-basis width of the column (defaults flexible).
+ *   loop     — wrap around at the ends (default true).
+ *   width    — width of the column (defaults 64).
  */
 export function WheelColumn({
   items,
@@ -38,52 +45,82 @@ export function WheelColumn({
   accent,
   text,
   textMuted,
+  loop = true,
 }) {
+  const N = items.length;
+  // Copies rendered above and below the middle copy. Enough headroom that
+  // even a hard fling (≈40 rows of travel) can never reach an end before
+  // the settle handler re-anchors into the middle copy.
+  const perSide = loop ? Math.max(2, Math.ceil(40 / N)) : 0;
+  const REPEATS = loop ? perSide * 2 + 1 : 1;
+  const total = N * REPEATS;
+  const centerStart = N * perSide; // first row of the middle copy
+
   const listRef = useRef(null);
   // Guards against re-anchoring the scroll position when the parent
   // re-renders with the very value this wheel just reported.
   const settledIndexRef = useRef(-1);
+  // True while a programmatic (non-animated) re-anchor is in flight —
+  // the momentum handler must not "settle" from it.
+  const anchoringRef = useRef(false);
   const momentumRef = useRef(false);
   const dragTimerRef = useRef(null);
-  const [curIndex, setCurIndex] = useState(() =>
-    Math.max(0, items.findIndex((i) => i.value === value)),
-  );
+  const [curIndex, setCurIndex] = useState(() => {
+    const i = items.findIndex((it) => it.value === value);
+    return i >= 0 ? i : 0;
+  });
 
   const indexFor = (v) => {
     const i = items.findIndex((it) => it.value === v);
     return i >= 0 ? i : 0;
   };
+  const rawIndexFor = (trueIdx) => (loop ? centerStart + trueIdx : trueIdx);
 
-  // Report the item that settled in the middle: derive its index from the
-  // raw scroll offset, highlight it, and push the new value up to the
-  // parent (skipped when the parent already holds that value).
+  // Highlight + report the row that settled in the middle. In loop mode
+  // the raw row index maps back into [0, N) with modulo.
   const settle = useCallback(
     (offsetY) => {
-      const idx = Math.max(0, Math.min(items.length - 1, Math.round(offsetY / ITEM_HEIGHT)));
-      settledIndexRef.current = idx;
-      setCurIndex(idx);
-      const next = items[idx];
+      anchoringRef.current = false;
+      const raw = Math.max(0, Math.min(total - 1, Math.round(offsetY / ITEM_HEIGHT)));
+      const trueIdx = loop ? ((raw % N) + N) % N : raw;
+      settledIndexRef.current = trueIdx;
+      setCurIndex(trueIdx);
+      const next = items[trueIdx];
       if (next && next.value !== value) onChange(next.value);
+      // Re-anchor into the middle copy so the next fling never runs out
+      // of rows in either direction. Non-animated, so it's invisible —
+      // the wheel is periodic.
+      const wanted = rawIndexFor(trueIdx);
+      if (loop && raw !== wanted) {
+        anchoringRef.current = true;
+        listRef.current?.scrollTo({ y: wanted * ITEM_HEIGHT, animated: false });
+        setTimeout(() => { anchoringRef.current = false; }, 100);
+      }
     },
-    [items, value, onChange],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [items, value, onChange, loop, N, total, centerStart],
   );
 
   // External value change (parent state, clamps, editing a saved task) —
   // re-anchor the wheel unless the user already settled on that value.
   useEffect(() => {
-    const idx = indexFor(value);
-    if (idx === settledIndexRef.current) return;
-    setCurIndex(idx);
+    const trueIdx = indexFor(value);
+    if (trueIdx === settledIndexRef.current) return;
+    setCurIndex(trueIdx);
     // The list may not exist yet on the very first frame — retry once the
     // layout pass has run.
     const t = setTimeout(() => {
-      listRef.current?.scrollTo({ y: idx * ITEM_HEIGHT, animated: false });
+      listRef.current?.scrollTo({ y: rawIndexFor(trueIdx) * ITEM_HEIGHT, animated: false });
     }, 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, items]);
+  }, [value, items, loop, centerStart]);
 
   useEffect(() => () => clearTimeout(dragTimerRef.current), []);
+
+  const rows = loop
+    ? Array.from({ length: total }, (_, i) => ({ ...items[i % N], raw: i }))
+    : items.map((it, i) => ({ ...it, raw: i }));
 
   return (
     <View style={[styles.column, { width }]}>
@@ -99,9 +136,9 @@ export function WheelColumn({
           },
         ]}
       />
-      {/* A plain (non-virtualized) ScrollView — wheels hold at most 60
-          rows, and a VirtualizedList here would be nested inside the
-          screens' ScrollViews, which RN warns against. */}
+      {/* A plain (non-virtualized) ScrollView — a VirtualizedList here
+          would be nested inside the screens' ScrollViews, which RN warns
+          against. A few hundred simple rows render fine. */}
       <ScrollView
         ref={listRef}
         showsVerticalScrollIndicator={false}
@@ -109,12 +146,23 @@ export function WheelColumn({
         snapToAlignment="start"
         decelerationRate="fast"
         nestedScrollEnabled
+        overScrollMode="never"
         style={styles.list}
         contentContainerStyle={styles.listContent}
+        scrollEventThrottle={16}
+        onScroll={(e) => {
+          // Live highlight while the wheel is in motion.
+          const raw = Math.round(e.nativeEvent.contentOffset.y / ITEM_HEIGHT);
+          const trueIdx = loop
+            ? ((raw % N) + N) % N
+            : Math.max(0, Math.min(N - 1, raw));
+          if (trueIdx !== curIndex) setCurIndex(trueIdx);
+        }}
         onMomentumScrollBegin={() => { momentumRef.current = true; }}
         onMomentumScrollEnd={(e) => {
           momentumRef.current = false;
           clearTimeout(dragTimerRef.current);
+          if (anchoringRef.current) return; // our own re-anchor, not the user
           settle(e.nativeEvent.contentOffset.y);
         }}
         onScrollEndDrag={(e) => {
@@ -123,15 +171,16 @@ export function WheelColumn({
           const y = e.nativeEvent.contentOffset.y;
           clearTimeout(dragTimerRef.current);
           dragTimerRef.current = setTimeout(() => {
-            if (momentumRef.current) return; // onMomentumScrollEnd handles it
+            if (momentumRef.current || anchoringRef.current) return;
             settle(y);
           }, 120);
         }}
       >
-        {items.map((item, index) => {
-          const selected = index === curIndex;
+        {rows.map((item) => {
+          const trueIdx = loop ? item.raw % N : item.raw;
+          const selected = trueIdx === curIndex;
           return (
-            <View key={String(item.value)} style={[styles.item, { height: ITEM_HEIGHT }]}>
+            <View key={item.raw} style={[styles.item, { height: ITEM_HEIGHT }]}>
               <Text
                 style={[
                   styles.itemText,
@@ -152,7 +201,8 @@ export function WheelColumn({
 /**
  * Days / hours / minutes duration wheel — the scrollable replacement for
  * the before-expiry custom stepper. Any total up to 7 days is reachable
- * with 1-unit granularity (no 5-minute stepping).
+ * with 1-unit granularity (no 5-minute stepping). Columns show bare
+ * numbers only — the units live in the header labels below.
  *
  * props:
  *   parts    — { days, hours, minutes }
@@ -171,18 +221,9 @@ export function DurationWheelPicker({
 }) {
   const range = (n) => Array.from({ length: n + 1 }, (_, i) => i);
 
-  const dayItems = range(maxDays).map((n) => ({
-    value: n,
-    label: n === 1 ? '1 day' : `${n} days`,
-  }));
-  const hourItems = range(23).map((n) => ({
-    value: n,
-    label: n === 1 ? '1 hr' : `${n} hrs`,
-  }));
-  const minItems = range(59).map((n) => ({
-    value: n,
-    label: `${n}`,
-  }));
+  const dayItems = range(maxDays).map((n) => ({ value: n, label: `${n}` }));
+  const hourItems = range(23).map((n) => ({ value: n, label: `${n}` }));
+  const minItems = range(59).map((n) => ({ value: n, label: String(n).padStart(2, '0') }));
 
   const patch = (field) => (v) => onChange({ ...parts, [field]: v });
 

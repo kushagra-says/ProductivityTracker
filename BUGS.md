@@ -10,9 +10,9 @@ This document lists every known issue filed against the ProductivityTracker app.
 | 4 | Midnight rollover | High | ✅ Completed |
 | 5 | Notifications (sound + vibration) | High | ✅ Completed |
 | 6 | Reminder time input | Medium | ✅ Completed |
-| 7 | Bottom-tab navigation | Medium | Open |
+| 7 | Bottom-tab navigation | Medium | ✅ Completed |
 | 8 | README / docs | Low | Open |
-| 9 | Add/Edit Task — card interactions | Medium | Open |
+| 9 | Add/Edit Task — card interactions | Medium | ✅ Completed |
 
 ---
 
@@ -210,13 +210,26 @@ The dashboard now reads `state.today` instead of calling `todayKey()` directly, 
 
 **Resolution**
 
-- New reusable wheel module `src/components/WheelPicker.js` exposing `WheelColumn` (a vertical snap-scrolling FlatList where the item that settles in the middle IS the selection), `DurationWheelPicker` (three columns: days 0–7, hours 0–23, minutes 0–59), and `DurationWheelLabels`.
+- New reusable wheel module `src/components/WheelPicker.js` exposing `WheelColumn` (a vertical snap-scrolling plain `ScrollView` where the item that settles in the middle IS the selection; a `FlatList` here would nest a VirtualizedList inside the screens' ScrollViews), `DurationWheelPicker` (three columns: days 0–7, hours 0–23, minutes 0–59), and `DurationWheelLabels`.
 - `src/components/InlineTimePicker.js` was rewritten to render the hour as a scrollable 1–12 wheel and the minute as a scrollable 0–59 wheel in 1-minute steps. The ± buttons are gone; AM/PM stays as separate buttons. All four call sites (AddTaskScreen, EditHobbyScreen, HobbiesScreen, SettingsScreen) pick this up unchanged via the same props.
 - In `src/screens/AddTaskScreen.js` the "Before expiry" custom d/h/m stepper (unit chips + ± row, minute step 5) was removed and replaced with `DurationWheelPicker`, so any value from 0 min up to 7 days is reachable with 1-minute granularity (e.g. 7 minutes). Preset chips, the latched "Custom…" mode, and the dynamic expiry cap clamp (`maxBeforeExpiryMinutes` → `partsWithinMax`) behave as before.
 
 **Follow-up — completed tasks keep ringing**
 
 Tapping complete on a task left its future custom/before-expiry notifications scheduled, so they still fired afterwards. `completeTask` in `AppContext` now cancels every scheduled `task-reminder` for that task id (custom one-shot, before-expiry, and the implicit 1-hour warning alike) at the moment of completion.
+
+**Follow-up — max cap shown as d/h/m**
+
+The before-expiry card used to read e.g. `Notify 30 min (30 min) before expiry — max 180 min`, showing raw minute totals. The breakdown and the dynamic cap now use a `formatDuration()` helper (`beforeExpiry.js`), so the card reads `Notify 30 min before expiry — max 3 hours` — d/h/m units only, no raw minute total.
+
+**Follow-up — looping wheels + numbers-only duration columns**
+
+- All wheel columns loop infinitely like a rotary dial: the item list is rendered several times and the offset is re-anchored into the middle copy after every settle, so scrolling past the last item wraps to the first (and vice versa) instead of hitting a hard stop. A plain `ScrollView` is used (not a `FlatList`) to keep the VirtualizedList-nesting warning away; a `momentum`-vs-`drag` fallback (`onScrollEndDrag` + 120 ms timer) settles Android drags released without velocity.
+- The before-expiry d/h/m columns show bare numbers only (`12`, `05`) — the unit labels (`DAYS` / `HRS` / `MIN`) live in the header row below the wheels.
+
+**Follow-up — unsaved-changes guard**
+
+Tapping back from Add/Edit Task, Edit Hobby, or Edit Category silently threw away any edits. A shared `src/hooks/useUnsavedGuard.js` hook now backs every mutating screen: the screen passes a snapshot of all its editable values (`draft`) on every render, the hook compares against the first render's values, and a `beforeRemove` listener intercepts back navigation (header back, hardware back) with a themed `ConfirmDialog` — "Discard changes?" with *Keep editing* (stays on the screen) and *Discard* (leaves). Because dirty is a *comparison* against the initial values (not a change counter), editing a field and then manually reverting every change does NOT pop the dialog. Save handlers call `clearDirty()` before `goBack()` so saving never pops the dialog.
 
 ---
 
@@ -239,6 +252,27 @@ Tapping complete on a task left its future custom/before-expiry notifications sc
 **Reproduction**
 
 1. Open the app on the Dashboard tab. Swipe left across most of the screen. The Tasks tab does not open.
+
+**Status:** ✅ Completed
+
+**Resolution**
+
+New `src/components/TabSwipe.js` exposes `withTabSwipe(Screen, tabName)` — an HOC wrapping a screen in a `react-native-gesture-handler` `Pan` gesture + `GestureDetector`:
+
+- The gesture only claims the touch after 24 px of horizontal travel; 14 px of vertical travel hands it back (`activeOffsetX` / `failOffsetY`). Vertical list scrolling therefore always wins — a small horizontal jitter while scrolling vertically never claims the gesture, let alone switches the tab.
+- A swipe past 35% of the screen width at finger-release navigates one tab left/right in `TAB_ORDER` (`Dashboard → Tasks → Categories → Hobbies → Insights`); anything shorter is ignored. Swipes past the ends do nothing.
+- `navigation.navigate` bubbles up from the nested stacks to the tab navigator, so the switch uses the exact same animation as a bottom-bar tap.
+- Only the five list screens are wrapped (module-level HOCs in `App.js`); stack screens (AddTask, HobbyDetail, EditCategory, Settings) keep their in-stack gestures untouched. `App` is now wrapped in `GestureHandlerRootView`, which the gesture API requires.
+
+**Follow-up — follow-drag preview + stack guard**
+
+- The current page now follows the finger while a **static snapshot** of the adjacent tab slides in over it from the swipe edge, so the pages look physically adjacent. Mounting the adjacent tab's real screen live in the sliding panel lagged badly (a full screen mount at gesture start + per-frame JS re-renders), so the preview is instead a cached screenshot: shortly after a tab gains focus, every tab that is not yet cached is mounted for ~400 ms in a hidden rig behind the current page (`collapsable={false}` so Android can't optimize the view away), screenshotted to a temp file via `react-native-view-shot`, and cached. The capture pipeline is a single **global** pump — one host (the focused tab), one mutex, at most one hidden screen mounted at any moment, debounced and deferred behind ongoing user interactions (`InteractionManager`) so background captures never compete with quick taps/toggles for the JS thread (an earlier per-wrapper pump re-captured every tab once per mounted wrapper on each data change, which lagged quick successive actions). A failed capture is skipped until the next data change instead of retry-looping. The registered preview component is the **plain** screen (no swipe wrapper, no nested navigator), so the rig never fires navigation focus events that would re-trigger captures. The cache is **shared app-wide and persists across tab switches** — after the first seconds the whole set is warm, so every swipe shows its page instantly with no label fallback appearing mid-gesture (the earlier per-focus invalidation meant revisits always started cold and the label was visible until the capture landed mid-swipe). The cache is dropped only when the underlying data or theme actually changes (reducer state / theme mode are compared by reference), then re-captured in the background. A swipe now only animates two values and reveals a cached `Image` — zero per-frame JS work. Until a snapshot is ready (the first seconds after launch) the panel falls back to a plain label. The preview is read-only by nature (`pointerEvents="none"`). On a passing release the gesture **finishes visually before switching**: the page glides fully off-screen with an eased animation while the snapshot panel expands to cover the viewport, and only then does the (instant) navigator swap happen underneath the covering panel — so the transition reads as one continuous motion instead of a hard cut. The completion duration scales with the remaining distance so a barely-passing drag and a full fling finish at a similar pace; gesture input is ignored while either the completion or the spring-back animation is settling. If the swipe falls short, the page springs back to place.
+- At the outer edges (Dashboard swiping left, Insights swiping right) the swipe is simply not possible — the page does not move at all, and the swipe host is painted with the theme background so no white void can appear behind a moving page.
+- A `stackGuard` option on the wrapper makes swipe switching unavailable whenever the tab's own stack holds a pushed screen — e.g. while creating/editing a task (Tasks tab) or a category (rubber-band only). Tab-swiping is therefore never available inside create/edit flows.
+
+**Follow-up — Android system back**
+
+The device's edge-swipe (system back) gesture on a tab list first returns to the Dashboard; a second back gesture from the Dashboard pops a themed "Leave the app?" confirm dialog — *Exit* calls `BackHandler.exitApp()`, cancel stays. If Android later restores the retained activity from the app selector, an `AppState` listener dismisses the dialog so the app always foregrounds clean. Deeper screens (Settings, AddTask, EditHobby, EditCategory, HobbyDetail) keep the default pop behaviour, so the unsaved-changes guard still governs them.
 
 ---
 
@@ -278,3 +312,40 @@ Tapping complete on a task left its future custom/before-expiry notifications sc
 
 1. New task → Start date. Tap the card body. Nothing happens. Have to find and tap the dashed "Set start date & time" button.
 2. New task → Custom reminder. Drag the slider switch to enable it. There is no way to enable the reminder by tapping the card body.
+
+**Status:** ✅ Completed
+
+**Resolution**
+
+Fixed across two commits:
+
+- `4d545c1` — *Expiry and Reminder Fix*: removed the `Switch` sliders from the reminder cards. Add/Edit Task (Custom reminder, Before expiry) and Edit Hobby (Daily reminder) now use the card-as-button pattern: tapping the header toggles the reminder on/off, a `×` inside the header clears it without bubbling, and the body expands inline (calendar / pickers) when on. The date cards seed a sensible default on header tap (now + 1 h, rounded) and render the inline picker directly — the dashed "Set …" buttons are gone.
+- `df79c16` — *Notifications / reminder card UX / validation toasts*: applied the same card-as-button pattern to the add-hobby modal's Daily reminder card (it still had a slider), and replaced the `Alert.alert()` validation popups with themed toasts across 6 screens for a consistent card UX.
+
+**Covered by:** tests.md Section I (`CARD-01..09`, manual smoke) — the card body is a plain `View` with a tappable header, and the `×` uses `stopPropagation` so it never triggers the card's own handler.
+
+---
+
+## Bug 10 — Insights "Today" card shows the completion rate twice
+
+**File:** `src/screens/InsightsScreen.js` (Today hero card)
+
+**Reported behaviour**
+
+- The completion-rate card at the top of the Insights page shows the percentage as large text on the left AND again inside a bordered circle on the right. The same number is rendered twice in two different visual treatments.
+
+**Expected behaviour**
+
+- Only the normal rate text is displayed — no duplicate ring/circle with the same percentage.
+
+**Reproduction**
+
+1. Open the Insights tab. The "Today" card shows `N%` as large text and the identical `N%` inside an 80 px bordered circle to its right.
+
+**Status:** ✅ Completed
+
+**Resolution**
+
+Removed the circle (`styles.rateCircle` / `rateCircleInner` / `rateCirclePercent`) and its JSX from the Today hero card. The card now shows only the existing large rate value with its "X of Y done today" subtext and the streak line.
+
+**Covered by:** tests.md INSIGHTS manual check — Today card shows a single percentage.

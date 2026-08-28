@@ -9,6 +9,8 @@ import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { useTheme, FONTS, RADIUS, SHADOW, SPACING } from '../utils/theme';
 import PrimaryButton from '../components/PrimaryButton';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { useUnsavedGuard } from '../hooks/useUnsavedGuard';
 
 const ICONS = [
   'book-outline', 'home-outline', 'barbell-outline', 'briefcase-outline',
@@ -33,6 +35,11 @@ export default function EditCategoryScreen() {
   const [icon, setIcon] = useState(cat?.icon || 'folder-outline');
   const [color, setColor] = useState(cat?.color || COLOR_OPTIONS[0]);
 
+  // "Go back without saving?" — the guard snapshots this draft on first
+  // render; editing a field and then manually reverting it is NOT dirty.
+  const draft = { name, icon, color };
+  const guard = useUnsavedGuard(draft);
+
   const handleSave = () => {
     if (!name.trim()) {
       toast.error('Please enter a category name.');
@@ -40,6 +47,7 @@ export default function EditCategoryScreen() {
     }
     updateCategory({ ...cat, name: name.trim(), icon, color });
     toast.success('Category updated');
+    guard.clearDirty();
     navigation.goBack();
   };
 
@@ -120,6 +128,17 @@ export default function EditCategoryScreen() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      <ConfirmDialog
+        visible={guard.confirmVisible}
+        title="Discard changes?"
+        message="You have unsaved changes. Going back now will lose them."
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        destructive
+        onConfirm={guard.discard}
+        onCancel={guard.keepEditing}
+      />
     </SafeAreaView>
   );
 }

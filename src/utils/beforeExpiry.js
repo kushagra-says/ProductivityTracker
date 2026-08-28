@@ -65,6 +65,18 @@ export function minutesToParts(totalMinutes) {
   return { days, hours, minutes };
 }
 
+// Format a number of minutes as a human d/h/m string — e.g. 1500 →
+// "1 day 1 hour", 45 → "45 min", 0 → "0 min". Used by the before-expiry
+// card so caps read "max 3 hours 30 min", never a raw minute total.
+export function formatDuration(totalMinutes) {
+  const { days, hours, minutes } = minutesToParts(totalMinutes);
+  const parts = [];
+  if (days)  parts.push(`${days} day${days === 1 ? '' : 's'}`);
+  if (hours) parts.push(`${hours} hour${hours === 1 ? '' : 's'}`);
+  if (minutes || parts.length === 0) parts.push(`${minutes} min`);
+  return parts.join(' ');
+}
+
 // Clamp a value for a given unit to its legal [min, max] range. Returns
 // the clamped value, or `value` unchanged if the unit is unknown.
 export function clampUnitValue(value, unit) {
