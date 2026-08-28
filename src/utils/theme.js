@@ -143,6 +143,9 @@ export const ACCENT_KEYS = ACCENT_KEYS_DARK;
 // JSON object rather than two separate keys so we can read/write both
 // preferences atomically and migrate cleanly from the legacy single key.
 const ACCENT_STORAGE_KEY = '@pt_accent_per_theme';
+// Exported so the backup exporter can include the accent map without
+// duplicating the key string. Read-only from outside this module.
+export { ACCENT_STORAGE_KEY };
 const LEGACY_ACCENT_STORAGE_KEY = '@pt_accent';
 
 const DEFAULT_ACCENTS = { dark: 'purple', cream: 'purple' };
@@ -217,6 +220,30 @@ export function ThemeProvider({ children }) {
     [mode],
   );
 
+  // Restore an accent-per-theme map from a backup import. Validates each
+  // side against its own theme's key set (cream accepts 'brown', dark
+  // doesn't) and applies live — unlike setAccentChoice, which only writes
+  // the active theme.
+  const applyAccentMap = useCallback((map) => {
+    if (!map || typeof map !== 'object') return;
+    let touched = false;
+    setAccentByMode((prev) => {
+      const next = { ...prev };
+      if (typeof map.dark === 'string' && ACCENT_KEYS_DARK.includes(map.dark)) {
+        next.dark = map.dark;
+        touched = true;
+      }
+      if (typeof map.cream === 'string' && ACCENT_KEYS_CREAM.includes(map.cream)) {
+        next.cream = map.cream;
+        touched = true;
+      }
+      if (touched) {
+        AsyncStorage.setItem(ACCENT_STORAGE_KEY, JSON.stringify(next)).catch(() => {});
+      }
+      return touched ? next : prev;
+    });
+  }, []);
+
   const basePalette = mode === 'dark' ? darkPalette : creamPalette;
   const accent = accentByMode[mode];
   const accentOverride =
@@ -236,6 +263,7 @@ export function ThemeProvider({ children }) {
         visibleAccentKeys,
         toggleThemeMode,
         setAccentChoice,
+        applyAccentMap,
       }}
     >
       {children}

@@ -289,6 +289,16 @@ The device's edge-swipe (system back) gesture on a tab list first returns to the
 - The README includes a high-level description, a feature checklist grouped by area (Tasks, Hobbies, Categories, Insights, Theming, Notifications, Polish), a "How it works" section that links the streak math + the year-grid layout, a Setup section, a Tech Stack section, and the Project Structure tree.
 - A short "Tests" section points at `tests.md` and explains the gate before each commit.
 
+**Status:** ✅ Completed
+
+**Resolution**
+
+- A **How it works** section now explains the two core logic pieces and links their modules: the global day-streak math (`src/utils/streak.js` — `todayKey` / `hasActivityToday` / `computeNextStreak`, credit/revert/noop semantics, midnight recomputation via `src/utils/midnight.js`) and the hobby year-grid layout (`src/utils/yearGrid.js` — per-month blocks of Mon-anchored week columns, no future cells). It also points at the other pure date modules (`calendar.js`, `beforeExpiry.js`, `hobbyStats.js`).
+- The **Tests** section was rewritten around the actual gate: the five Node suites (`run-streak/before-expiry/calendar/year-grid/midnight`) totalling 233 assertions, the `[MANUAL]` checks, the `TESTS` commit-body format, and the FAIL/PARTIAL blocking rule.
+- The **Project Structure** tree was refreshed to match reality (adds `tests/`, `TabSwipe.js`, `MonthGridCalendar.js`, `WheelPicker.js`, `useUnsavedGuard.js`, and the `streak/midnight/calendar/yearGrid/beforeExpiry` utils; drops the non-existent `InlineDatePicker.js`).
+- The feature list was brought up to date: swipe-between-tabs with cached page previews + smooth completion, Android back-to-exit flow, unsaved-changes guard, card-as-button UX, wheel pickers, toast validation. The stale "all-time completion ring" Insights claim was corrected to describe the actual Today hero card.
+- Tech Stack updated (`react-native-view-shot`, `stack` not `native-stack`).
+
 ---
 
 ## Bug 9 — Reminders and date cards use controls instead of card-as-button

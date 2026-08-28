@@ -723,6 +723,23 @@ export function AppProvider({ children }) {
     updateSettings: useCallback((patch) => {
       dispatch({ type: 'UPDATE_SETTINGS', payload: patch });
     }, []),
+
+    // Backup restore: replace the whole state with a (pre-validated)
+    // payload. Routed through LOAD_STATE so the reducer's migration +
+    // sanitization (task field backfill, settings merge, today stamp)
+    // runs on the imported blob exactly as it does on launch. The OS has
+    // no memory of the imported tasks/hobbies, so every reminder is
+    // re-scheduled from scratch (past triggers are skipped internally).
+    restoreData: useCallback(
+      (payload) => {
+        dispatch({ type: 'LOAD_STATE', payload });
+        for (const t of payload?.tasks || []) rescheduleTaskNotifications(t);
+        for (const h of payload?.hobbies || []) {
+          if (h.reminderTime) scheduleHobbyReminder(h);
+        }
+      },
+      [rescheduleTaskNotifications, scheduleHobbyReminder],
+    ),
   };
 
   return (

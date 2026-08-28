@@ -42,7 +42,7 @@ ProductivityTracker is a single-user, on-device productivity journal. It doesn't
 - Resets correctly after a gap day; carries over correctly after a day with only a hobby.
 
 ### 📊 Insights & Charts
-- An all-time completion ring with the current streak.
+- A "Today" hero card: completion rate with an "X of Y done today" breakdown and the current streak.
 - Range filter: `All time` / `30 days` / `7 days` — every chart in the screen respects the range.
 - Task completions and hobby consistency as separate 7-day bar charts.
 - Per-category and per-priority breakdowns scoped to the selected range.
@@ -73,12 +73,44 @@ ProductivityTracker is a single-user, on-device productivity journal. It doesn't
 - All notification content is decorated with the right channel id / sound for the platform.
 
 ### ✨ Polish
+- **Swipe between pages** — a horizontal swipe on any of the five tabs moves to the adjacent page, with a cached static snapshot of the next page sliding in so the pages look physically adjacent. The gesture never fights vertical list scrolling, outer-edge swipes are impossible, and swiping is locked while a create/edit form is open.
+- Smooth swipe completion — a passing swipe glides off-screen with an eased animation before the tab switches underneath.
+- **Android back flow** — system back on a tab list returns to the Dashboard; a second back from the Dashboard asks before leaving the app.
+- **Unsaved-changes guard** — leaving Add/Edit Task, Edit Hobby, or Edit Category with unsaved edits asks first; manually reverting every change does not.
+- Card-as-button UX: date and reminder cards expand/toggle from a tap anywhere on the card, with a `×` that clears without bubbling.
+- Inline month-grid calendar picker (past days disabled, custom reminders capped at expiry) and loop-scrolling wheel pickers with 1-minute granularity.
+- Validation feedback via a slide-in toast (success / info / danger variants) instead of system alerts.
 - Pull-to-refresh on every list (Dashboard, Tasks, Hobbies, Categories, Insights).
 - Animated counters that ease between values on the Insights hero.
 - Soft tap haptic + press-scale on primary buttons.
-- Action feedback via a slide-in toast (success / info / danger variants).
 - Auto-expire sweep for tasks in the background.
 - Midnight-aware timers that update streaks, hobbies, and the auto-expire sweep the moment the day changes — no manual reload needed.
+
+---
+
+## 🧠 How it works
+
+Two pieces of logic do most of the app's "smart" work, and both live as **pure, React-free modules** so the Node test harness exercises the exact code path the app runs:
+
+### Streak math — [`src/utils/streak.js`](./src/utils/streak.js)
+
+The dashboard's day streak is a single global number credited by *any* activity — completing a task or checking a hobby earns the same unit: a day.
+
+- `todayKey(date)` renders a local-time `YYYY-MM-DD` key; hobby completions are stored under that key (`hobby.completions[key] = true`), so all day-boundary math is string comparison — no timezone drift.
+- `hasActivityToday(tasks, hobbies)` scans for a task `completedAt` inside today's local-day window, or any hobby checked for today's key.
+- `computeNextStreak({ tasks, hobbies, anchorDate, currentStreak })` is the pure decision function: it returns `credit` (anchor moves to today — streak +1 if it was anchored yesterday, otherwise a fresh 1), `revert` (today's credit was undone — streak −1, anchor steps back, clamped at 0), or `noop`. The context merely dispatches what it decides. A gap day resets to 1; a day with only a hobby still credits; undoing today's only completion reverts instead of resetting.
+- It is recomputed on every task/hobby change, every 60 s, on foreground, and within a second of local midnight ([`src/utils/midnight.js`](./src/utils/midnight.js) schedules the midnight tick and stamps `state.today` so all day-boundary UI flips live).
+
+### Year-grid layout — [`src/utils/yearGrid.js`](./src/utils/yearGrid.js)
+
+The hobby detail page renders a GitHub-style history grid, but split into **per-month blocks** — each month is its own self-contained group of week columns (with a visual gap between blocks) so month boundaries are always visible.
+
+- `buildMonthWeeks(year, month)` builds one block: the first column starts on the Monday of the week containing the 1st, the last ends on the Sunday of the week containing the month's final day — fixed 7-row Mon–Sun columns, so nothing shifts mid-row.
+- `buildMonthSections(today)` returns the year's sections, January through today's month, each carrying its own month label for the block header.
+- Days strictly after today are never rendered — the current week's column fills up day by day, and a cell on today counts as not-future.
+- The Mon–Sun gutter (`DOW_LABELS`) maps rows 1:1 with cell rows, so the alignment the tests assert is exactly what the screen draws.
+
+The same pattern holds for the rest of the date logic: the inline calendar ([`src/utils/calendar.js`](./src/utils/calendar.js)), the before-expiry reminder presets/caps ([`src/utils/beforeExpiry.js`](./src/utils/beforeExpiry.js)), and hobby stats ([`src/utils/hobbyStats.js`](./src/utils/hobbyStats.js)) are all pure modules under `src/utils/` with dedicated Node test suites (see [Tests](#-tests)).
 
 ---
 
@@ -110,31 +142,35 @@ eas build --platform android # / ios
 
 ## 🧪 Tests
 
-Every commit is gated by `tests.md`. Before pushing, run through the full test plan and paste the `TESTS` block (in the format defined there) into the commit body. The plan covers:
+Every change is gated by [`tests.md`](./tests.md) — the pre-commit gate. A `FAIL` blocks the commit; a `PARTIAL` is allowed only with a written justification.
 
-- Streak math (5 cases + a full-week simulation)
-- Task add/edit before-expiry custom-mode behavior (4 cases)
-- Time picker scrollability and AM/PM (5 cases)
-- Hobby history grid alignment and future-date cutoff (6 cases)
-- Midnight rollover and auto-expire (5 cases)
-- Notification channel + handler + manual device test (6 cases)
-- Swipe-between-tabs behavior (6 cases)
-- Sanity coverage for every other area (theming, persistence, navigation, categories, hobbies, insights)
+**Automated gate — 233 assertions.** The pure logic modules run in plain Node (no React, no native), so the same code the app executes is asserted directly:
 
-A `FAIL` blocks the commit. A `PARTIAL` is allowed only with a written justification. See [`tests.md`](./tests.md) for the full plan and reporting format.
+```bash
+node tests/run-streak-tests.mjs          # 18  — global day-streak decisions
+node tests/run-before-expiry-tests.mjs   # 52  — before-expiry presets, caps, formatting
+node tests/run-calendar-tests.mjs        # 35  — inline month-grid calendar layout
+node tests/run-year-grid-tests.mjs       # 106 — hobby history grid coordinates
+node tests/run-midnight-tests.mjs        # 22  — local-midnight rollover + auto-expire
+```
 
-Open bugs are tracked in [`BUGS.md`](./BUGS.md). A test in `tests.md` is added for every bug; closing a bug requires that test to read `PASS`.
+All five must print `0 fail` before a commit. The expected total is exactly **233 PASS** — if you added cases, update the count in `tests.md` section Z.
+
+**Manual checks** — everything that needs a screen or a device (notification sound/vibration, swipe feel, dialogs, theming) is marked `[MANUAL]` in `tests.md` and is checked off by hand before commit. The commit body carries a verbatim `TESTS` block in the reporting format defined at the top of `tests.md`.
+
+Open bugs are tracked in [`BUGS.md`](./BUGS.md). Every bug gets a test in `tests.md`; closing a bug requires that test to read `PASS`.
 
 ---
 
 ## 🧰 Tech Stack
 
 - **React Native** `0.74.5` + **Expo** `~51.0.0`
-- **React Navigation** (`bottom-tabs` + `native-stack`)
+- **React Navigation** (`bottom-tabs` + `stack`)
 - **AsyncStorage** for local persistence
 - **expo-notifications** for local reminders
 - **react-native-svg** + **react-native-chart-kit** for charts
 - **react-native-gesture-handler** for swipes and pulls
+- **react-native-view-shot** for cached swipe-preview snapshots
 - **date-fns** for date math (streak, year grid, monthly chart)
 - Zero remote services. Zero analytics. Zero ads.
 
@@ -144,13 +180,19 @@ Open bugs are tracked in [`BUGS.md`](./BUGS.md). A test in `tests.md` is added f
 
 ```
 ProductivityTracker/
-├── App.js                        # Root navigation (tabs + settings stack)
+├── App.js                        # Root navigation (tabs + settings stack), system-back flow
 ├── app.json                      # Expo config
 ├── eas.json                      # EAS Build profile
 ├── package.json
 ├── README.md
-├── BUGS.md                       # Open bugs and their reproduction steps
+├── BUGS.md                       # Bug reports, resolutions, reproduction steps
 ├── tests.md                      # Pre-commit test plan + reporting format
+├── tests/                        # Pure-logic Node suites (233 assertions, run pre-commit)
+│   ├── run-streak-tests.mjs
+│   ├── run-before-expiry-tests.mjs
+│   ├── run-calendar-tests.mjs
+│   ├── run-year-grid-tests.mjs
+│   └── run-midnight-tests.mjs
 └── src/
     ├── context/
     │   ├── AppContext.js         # Global state, streak math, notification scheduling
@@ -167,19 +209,27 @@ ProductivityTracker/
     │   ├── InsightsScreen.js     # Charts, range filter, breakdown
     │   └── SettingsScreen.js     # Theme toggle + accent picker
     ├── components/
-    │   ├── LineChart.js              # Reusable SVG line chart primitive
+    │   ├── TabSwipe.js           # Swipe-between-tabs HOC + snapshot preview cache
+    │   ├── LineChart.js          # Reusable SVG line chart primitive
     │   ├── MonthlyCategoryLineChart.js
-    │   ├── HobbyMonthlyChart.js      # Per-hobby monthly view
-    │   ├── InlineDatePicker.js       # In-app date stepper
-    │   ├── InlineTimePicker.js       # Scrollable hour/minute wheel + AM/PM
-    │   ├── ConfirmDialog.js          # Reusable themed confirm modal
-    │   └── PrimaryButton.js          # Themed press-feedback button
+    │   ├── HobbyMonthlyChart.js  # Per-hobby monthly view
+    │   ├── MonthGridCalendar.js  # Inline month-grid date picker
+    │   ├── WheelPicker.js        # Loop-scrolling wheel (time + durations)
+    │   ├── InlineTimePicker.js   # Scrollable hour/minute wheel + AM/PM
+    │   ├── ConfirmDialog.js      # Reusable themed confirm modal
+    │   └── PrimaryButton.js      # Themed press-feedback button
     ├── hooks/
-    │   ├── useCountUp.js             # Animated number tween
-    │   └── usePullRefresh.js         # RefreshControl wrapper
+    │   ├── useCountUp.js         # Animated number tween
+    │   ├── usePullRefresh.js     # RefreshControl wrapper
+    │   └── useUnsavedGuard.js    # Snapshot-based unsaved-changes guard
     └── utils/
         ├── theme.js              # Palettes + ThemeProvider + accent presets
-        ├── hobbyStats.js         # Streak math, day helpers
+        ├── streak.js             # Pure day-streak math (credited by task OR hobby)
+        ├── midnight.js           # Local-midnight loop + today-key stamping
+        ├── calendar.js           # Month-grid calendar helpers
+        ├── yearGrid.js           # Hobby year-grid week/month coordinates
+        ├── beforeExpiry.js       # Before-expiry presets, caps, formatting
+        ├── hobbyStats.js         # Per-hobby streaks, day helpers
         └── relTime.js            # Relative-time formatter
 ```
 
@@ -196,6 +246,7 @@ Open Settings from the gear icon in the dashboard header to:
 ## 💾 Data
 
 - All app data is stored on-device under the AsyncStorage key `@pt_state`.
+- **Backup / restore** — Settings → Data: export everything (tasks, hobbies, categories, streak, settings, accent choices) as a versioned JSON file to your device's Downloads folder, and import a backup later to restore it. Import validates the file, asks before replacing, and re-arms all reminders from the restored data.
 - Reinstalling over the existing app keeps your tasks, hobbies, categories, and streak intact.
 - The accent choice is stored under `@pt_accent_per_theme` (with a one-time migration from the legacy `@pt_accent`).
 - Hobby completion history is preserved indefinitely and powers the all-time stats and year grid.

@@ -1,14 +1,44 @@
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform,
   Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import * as DocumentPicker from 'expo-document-picker';
 import { useApp } from '../context/AppContext';
+import { useToast } from '../context/ToastContext';
 import { useTheme, ACCENTS, ACCENTS_CREAM, FONTS, RADIUS, SHADOW, SPACING } from '../utils/theme';
+import { ACCENT_STORAGE_KEY } from '../utils/theme';
 import InlineTimePicker from '../components/InlineTimePicker';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { APP_VERSION } from '../utils/appVersion';
+import {
+  buildBackup, parseBackup, backupFileName,
+} from '../utils/backup';
+
+// Remembered SAF directory (the user's Downloads folder) so exports
+// after the first one don't re-ask for the folder.
+const BACKUP_DIR_KEY = '@pt_backup_dir';
+
+// Features shipped in the unpushed batch, shown in Settings (WHAT'S NEW).
+const WHATS_NEW = [
+  'Swipe between pages with a live page preview, and a smooth completion animation',
+  'Android back flow: back returns to Dashboard, then asks before leaving the app',
+  'Unsaved-changes guard on Add/Edit Task, Edit Hobby and Edit Category',
+  'Data backup: export to / restore from a JSON file in Downloads',
+  'Reminder wheels now loop (infinite scroll) with 1-minute granularity',
+  'Undo button on completed tasks — send a task back to pending',
+  'Notification sound + vibration on Android; toasts replace system alerts',
+  'Card-as-button UX: date and reminder cards toggle from a tap anywhere',
+  'Hobby history grid rebuilt: per-month blocks, correct alignment, no future days',
+  'Everything refreshes at local midnight — no manual reload needed',
+  'Streak credited by completing either a task or a hobby, with correct gap/reset handling',
+];
 
 // Parse a stored "HH:mm" string into a Date for the time picker.
 const timeFromHHMM = (hhmm) => {
@@ -105,10 +135,145 @@ function NotificationRow({
 }
 
 export default function SettingsScreen() {
-  const { COLORS, mode, accent, visibleAccentKeys, setAccentChoice, toggleThemeMode } = useTheme();
-  const { state, updateSettings } = useApp();
+  const { COLORS, mode, accent, visibleAccentKeys, setAccentChoice, toggleThemeMode, applyAccentMap } = useTheme();
+  const { state, updateSettings, restoreData } = useApp();
+  const toast = useToast();
   const navigation = useNavigation();
   const settings = state.settings;
+
+  const [busy, setBusy] = useState(false);
+  // Parsed + validated backup awaiting the destructive-restore confirm.
+  const [pendingImport, setPendingImport] = useState(null);
+
+  // Export: write a versioned JSON envelope. On Android the user picks a
+  // folder (their Downloads) ONCE — the SAF directory URI is remembered,
+  // so every later export auto-saves with no prompt. If the remembered
+  // folder has since been deleted/revoked, the write falls back to a
+  // single re-pick and re-members the new folder. Elsewhere, the file is
+  // written to cache and handed to the system share sheet.
+  const handleExport = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      let accentByTheme = null;
+      try {
+        const raw = await AsyncStorage.getItem(ACCENT_STORAGE_KEY);
+        if (raw) accentByTheme = JSON.parse(raw);
+      } catch {
+        // Accents are optional in the backup — proceed without them.
+      }
+      const json = JSON.stringify(buildBackup(state, accentByTheme), null, 2);
+      const name = backupFileName();
+
+      if (Platform.OS === 'android') {
+        const writeInto = async (dirUri) => {
+          const fileUri = await FileSystem.StorageAccessFramework.createFileAsync(
+            dirUri,
+            'application/json',
+            name,
+          );
+          await FileSystem.writeAsStringAsync(fileUri, json, {
+            encoding: FileSystem.EncodingType.UTF8,
+          });
+        };
+        const askForFolder = async () => {
+          const perms = await FileSystem.StorageAccessFramework
+            .requestDirectoryPermissionsAsync();
+          if (!perms.granted) {
+            toast.info('Export cancelled — no folder chosen.');
+            return null;
+          }
+          await AsyncStorage.setItem(BACKUP_DIR_KEY, perms.directoryUri);
+          return perms.directoryUri;
+        };
+
+        let dirUri = await AsyncStorage.getItem(BACKUP_DIR_KEY);
+        if (dirUri) {
+          try {
+            await writeInto(dirUri);
+          } catch {
+            // Remembered folder is stale (deleted, moved, or permission
+            // revoked by the OS) — forget it and ask exactly once more.
+            await AsyncStorage.removeItem(BACKUP_DIR_KEY);
+            dirUri = await askForFolder();
+            if (!dirUri) return;
+            await writeInto(dirUri);
+          }
+        } else {
+          dirUri = await askForFolder();
+          if (!dirUri) return;
+          await writeInto(dirUri);
+        }
+        toast.success(`Backup saved: ${name}`);
+      } else {
+        const uri = `${FileSystem.cacheDirectory}${name}`;
+        await FileSystem.writeAsStringAsync(uri, json, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(uri, {
+            mimeType: 'application/json',
+            dialogTitle: 'Save your backup',
+          });
+        }
+        toast.success(`Backup ready: ${name}`);
+      }
+    } catch (e) {
+      console.warn('Export failed', e);
+      toast.error('Export failed — please try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Import: pick a file, parse + validate, then ask before destroying.
+  const handlePickImport = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await DocumentPicker.getDocumentAsync({
+        // NOT 'application/json': most Android file providers report
+        // .json files as 'application/octet-stream' (or no MIME at all),
+        // which greys them out in the picker. Accept everything here —
+        // parseBackup below rejects anything that isn't a real backup.
+        type: '*/*',
+        copyToCacheDirectory: true,
+      });
+      if (res.canceled || !res.assets?.length) return;
+      const text = await FileSystem.readAsStringAsync(res.assets[0].uri, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        toast.error('That file is not valid JSON.');
+        return;
+      }
+      const backup = parseBackup(parsed);
+      if (!backup.ok) {
+        toast.error(backup.error);
+        return;
+      }
+      setPendingImport(backup);
+    } catch (e) {
+      console.warn('Import failed', e);
+      toast.error('Could not read the selected file.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmImport = () => {
+    const backup = pendingImport;
+    if (!backup) return;
+    setPendingImport(null);
+    restoreData(backup.data);
+    if (backup.accentByTheme) applyAccentMap(backup.accentByTheme);
+    toast.success(
+      `Restored ${backup.counts.tasks} tasks · ${backup.counts.hobbies} hobbies`,
+    );
+  };
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: COLORS.bg }]}>
@@ -221,11 +386,56 @@ export default function SettingsScreen() {
           />
         </View>
 
+        {/* Data backup */}
+        <Text style={[styles.section, { color: COLORS.textMuted, marginTop: SPACING.xl }]}>
+          DATA
+        </Text>
+        <View style={[styles.card, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}>
+          <TouchableOpacity
+            style={[styles.row, styles.dataRow, { borderBottomColor: COLORS.border }]}
+            onPress={handleExport}
+            disabled={busy}
+          >
+            <View style={[styles.rowIconWrap, { backgroundColor: COLORS.accentDim }]}>
+              <Ionicons name="download-outline" size={18} color={COLORS.accent} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.rowTitle, { color: COLORS.text }]}>Export data</Text>
+              <Text style={[styles.rowSub, { color: COLORS.textMuted }]}>
+                Save a backup file (tasks, hobbies, streak, settings) to your Downloads folder
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.row}
+            onPress={handlePickImport}
+            disabled={busy}
+          >
+            <View style={[styles.rowIconWrap, { backgroundColor: COLORS.accentDim }]}>
+              <Ionicons name="folder-open-outline" size={18} color={COLORS.accent} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.rowTitle, { color: COLORS.text }]}>Import backup</Text>
+              <Text style={[styles.rowSub, { color: COLORS.textMuted }]}>
+                Restore from a backup file — replaces all current data
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+          </TouchableOpacity>
+        </View>
+
         {/* Data info */}
         <Text style={[styles.section, { color: COLORS.textMuted, marginTop: SPACING.xl }]}>
           ABOUT
         </Text>
         <View style={[styles.card, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}>
+          <View style={styles.aboutRow}>
+            <Ionicons name="information-circle-outline" size={16} color={COLORS.textMuted} />
+            <Text style={[styles.aboutText, { color: COLORS.textSub }]}>
+              Version {APP_VERSION}
+            </Text>
+          </View>
           <View style={styles.aboutRow}>
             <Ionicons name="lock-closed-outline" size={16} color={COLORS.textMuted} />
             <Text style={[styles.aboutText, { color: COLORS.textSub }]}>
@@ -240,8 +450,36 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* What's new — features shipped in this release batch. */}
+        <Text style={[styles.section, { color: COLORS.textMuted, marginTop: SPACING.xl }]}>
+          WHAT'S NEW
+        </Text>
+        <View style={[styles.card, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border, padding: SPACING.md }]}>
+          {WHATS_NEW.map((item) => (
+            <View key={item} style={styles.newRow}>
+              <View style={[styles.newDot, { backgroundColor: COLORS.accent }]} />
+              <Text style={[styles.newText, { color: COLORS.textSub }]}>{item}</Text>
+            </View>
+          ))}
+        </View>
+
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      <ConfirmDialog
+        visible={!!pendingImport}
+        title="Restore backup?"
+        message={
+          pendingImport
+            ? `This will replace ALL current data with the backup (${pendingImport.counts.tasks} tasks, ${pendingImport.counts.hobbies} hobbies, ${pendingImport.counts.categories} categories). This cannot be undone.`
+            : ''
+        }
+        icon="server-outline"
+        confirmLabel="Restore"
+        destructive
+        onConfirm={confirmImport}
+        onCancel={() => setPendingImport(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -324,4 +562,10 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   aboutText: { fontSize: 12, flex: 1 },
+
+  dataRow: { borderBottomWidth: 1 },
+
+  newRow:  { flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingVertical: 5 },
+  newDot:  { width: 6, height: 6, borderRadius: 3, marginTop: 6 },
+  newText: { fontSize: 12, flex: 1, lineHeight: 17 },
 });

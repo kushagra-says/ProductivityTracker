@@ -679,6 +679,48 @@ Covered by: source-level grep + smoke below.
 
 ---
 
+## N. Data backup — export / import (Settings)
+
+Export writes a versioned JSON envelope (`format: productivity-tracker-backup`, `version: 1`) containing tasks, categories, hobbies, streak, lastActiveDate, settings, and the accent-per-theme map. Import validates the envelope, asks before replacing, routes through `LOAD_STATE`, and re-schedules every imported reminder. The import picker accepts any file (`*/*`) — Android providers commonly mislabel `.json` as `application/octet-stream`, which greys files out under a strict MIME filter; content validation (`parseBackup`) is the real gate.
+
+### BAK-01 — Export saves a file **[MANUAL]**
+- **Pre-conditions:** At least one task and one hobby exist.
+- **Steps:** Settings → Data → Export data. Choose the Downloads folder when the folder picker appears (first export only).
+- **Expected:** A toast confirms the save; `productivity-tracker-backup-YYYY-MM-DD-HHmm.json` appears in the chosen folder and contains `"format": "productivity-tracker-backup"`.
+
+### BAK-02 — Second export does not re-ask the folder **[MANUAL]**
+- **Steps:** Export again.
+- **Expected:** No folder picker — the file is written directly and a toast confirms it.
+
+### BAK-08 — Stale remembered folder self-heals **[MANUAL]**
+- **Pre-conditions:** An export has completed before (folder remembered). Delete or rename the chosen folder in the device's file manager.
+- **Steps:** Export again.
+- **Expected:** The write to the stale folder fails silently, the folder picker appears exactly once more, and after re-choosing Downloads the file is saved with a success toast.
+
+### BAK-03 — Import restores everything **[MANUAL]**
+- **Pre-conditions:** Use the file from BAK-01 after changing data (add a task, toggle a hobby).
+- **Steps:** Settings → Data → Import backup → pick the file → confirm the dialog.
+- **Expected:** Data matches the backup exactly (tasks, hobbies, categories, streak). Accent colors revert to the backed-up choices. A toast reports the restored counts.
+
+### BAK-04 — Import asks before destroying **[MANUAL]**
+- **Steps:** Pick a valid backup file.
+- **Expected:** A confirm dialog lists the backup's task/hobby/category counts and warns it cannot be undone. Cancel restores nothing.
+
+### BAK-05 — Reminders survive a restore **[MANUAL]**
+- **Pre-conditions:** Backup contains a task with a future before-expiry reminder.
+- **Steps:** Restore on a fresh install (or after deleting the task). Inspect scheduled notifications.
+- **Expected:** The task's reminders are re-scheduled from the imported data; expired/past triggers are not scheduled.
+
+### BAK-06 — Bad files are rejected gracefully **[MANUAL]**
+- **Steps:** Import a random `.json` file, then a truncated backup.
+- **Expected:** An error toast names the problem — no crash, no data change.
+
+### BAK-07 — Non-backup JSON / newer version rejected **[MANUAL]**
+- **Steps:** Hand-edit a backup to `"version": 99` and import.
+- **Expected:** Toast says the backup version is newer than the app supports.
+
+---
+
 ## Z. Pre-commit gate (run order)
 
 1. Run the automated suites in this order:
