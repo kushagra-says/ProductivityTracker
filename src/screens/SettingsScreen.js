@@ -7,7 +7,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system';
+// SDK 57 moved the readAsString/writeAsString/SAF API into the `legacy`
+// subpath — the new top-level API is a File/Directory class model that has
+// no StorageAccessFramework, which the backup export needs.
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import { useApp } from '../context/AppContext';
@@ -27,17 +30,10 @@ const BACKUP_DIR_KEY = '@pt_backup_dir';
 
 // Features shipped in the unpushed batch, shown in Settings (WHAT'S NEW).
 const WHATS_NEW = [
-  'Swipe between pages with a live page preview, and a smooth completion animation',
-  'Android back flow: back returns to Dashboard, then asks before leaving the app',
-  'Unsaved-changes guard on Add/Edit Task, Edit Hobby and Edit Category',
-  'Data backup: export to / restore from a JSON file in Downloads',
-  'Reminder wheels now loop (infinite scroll) with 1-minute granularity',
-  'Undo button on completed tasks — send a task back to pending',
-  'Notification sound + vibration on Android; toasts replace system alerts',
-  'Card-as-button UX: date and reminder cards toggle from a tap anywhere',
-  'Hobby history grid rebuilt: per-month blocks, correct alignment, no future days',
-  'Everything refreshes at local midnight — no manual reload needed',
-  'Streak credited by completing either a task or a hobby, with correct gap/reset handling',
+  'Task cards now show the set priority right in the list, next to the category',
+  'More accent colors to choose from — ten accents in both themes',
+  'Morning briefing now lists the day’s top 5 oldest pending tasks, high to low priority',
+  'Hobbies that are already completed for the day no longer send a reminder',
 ];
 
 // Parse a stored "HH:mm" string into a Date for the time picker.
@@ -313,8 +309,8 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Accent picker — grid depends on the active theme. Dark shows the
-            original 4; cream shows 4 + a 'brown' row. */}
+        {/* Accent picker — both themes show the same ten accents (brown is
+            available in dark too, in its own lighter dark-tuned shade). */}
         <Text style={[styles.section, { color: COLORS.textMuted, marginTop: SPACING.xl }]}>
           ACCENT COLOR
         </Text>

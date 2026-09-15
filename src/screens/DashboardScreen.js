@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl,
 } from 'react-native';
@@ -27,6 +27,7 @@ function StatCard({ label, value, color, icon, COLORS }) {
     </View>
   );
 }
+const MemoStatCard = React.memo(StatCard);
 
 function TaskRow({ task, categories, onComplete, COLORS }) {
   const cat = categories.find((c) => c.id === task.categoryId);
@@ -35,6 +36,14 @@ function TaskRow({ task, categories, onComplete, COLORS }) {
     completed: COLORS.success,
     expired: COLORS.danger,
   }[task.status];
+
+  // Same palette/icons as the AddTask priority chips, so the dashboard
+  // rows read exactly like the picker the user set them with.
+  const priorityMeta = {
+    High: { color: COLORS.danger, icon: 'ellipse' },
+    Medium: { color: COLORS.warning, icon: 'ellipse' },
+    Low: { color: COLORS.success, icon: 'ellipse-outline' },
+  }[task.priority];
 
   const dueLabel = (() => {
     if (!task.expiryDate) return null;
@@ -85,6 +94,12 @@ function TaskRow({ task, categories, onComplete, COLORS }) {
               <Text style={[styles.pillText, { color: cat.color }]}>{cat.name}</Text>
             </View>
           )}
+          {priorityMeta && (
+            <View style={[styles.pill, { backgroundColor: priorityMeta.color + '22' }]}>
+              <Ionicons name={priorityMeta.icon} size={11} color={priorityMeta.color} />
+              <Text style={[styles.pillText, { color: priorityMeta.color }]}>{task.priority}</Text>
+            </View>
+          )}
           {dueLabel && (
             <Text style={[styles.metaText, { color: COLORS.textMuted }]}>{dueLabel}</Text>
           )}
@@ -99,6 +114,7 @@ function TaskRow({ task, categories, onComplete, COLORS }) {
     </View>
   );
 }
+const MemoTaskRow = React.memo(TaskRow);
 
 function HobbyRow({ hobby, onToggle, COLORS, today }) {
   const done = !!(hobby.completions && hobby.completions[today]);
@@ -144,6 +160,7 @@ function HobbyRow({ hobby, onToggle, COLORS, today }) {
     </TouchableOpacity>
   );
 }
+const MemoHobbyRow = React.memo(HobbyRow);
 
 export default function DashboardScreen() {
   const { state, completeTask, toggleHobbyToday } = useApp();
@@ -197,14 +214,27 @@ export default function DashboardScreen() {
   const activeCount = useCountUp(stats.active);
   const hobbiesTodayCount = useCountUp(stats.hobbiesToday);
 
-  const handleTaskComplete = (id) => {
+  // Category quick-view stats: precomputed once per data change instead of
+  // re-filtering the whole task list for every category on every render.
+  const categoryStats = useMemo(
+    () => state.categories.map((cat) => {
+      const catTasks = state.tasks.filter((t) => t.categoryId === cat.id);
+      const done = catTasks.filter((t) => t.status === 'completed').length;
+      const pct = catTasks.length ? Math.round((done / catTasks.length) * 100) : 0;
+      return { cat, done, total: catTasks.length, pct };
+    }),
+    [state.categories, state.tasks],
+  );
+
+  const handleTaskComplete = useCallback((id) => {
     completeTask(id);
     toast.success('Task completed');
-  };
-  const handleHobbyToggle = (id, date) => {
+  }, [completeTask, toast]);
+
+  const handleHobbyToggle = useCallback((id, date) => {
     toggleHobbyToday(id, date);
     toast.info('Hobby updated');
-  };
+  }, [toggleHobbyToday, toast]);
 
   const greeting = () => {
     const h = new Date().getHours();
@@ -265,9 +295,9 @@ export default function DashboardScreen() {
 
         {/* Stats */}
         <View style={styles.statsRow}>
-          <StatCard COLORS={COLORS} label="Completed" value={completedCount} color={COLORS.success} icon="checkmark-circle" />
-          <StatCard COLORS={COLORS} label="Active"    value={activeCount}    color={COLORS.accent}  icon="time-outline" />
-          <StatCard COLORS={COLORS} label="Hobbies"   value={`${hobbiesTodayCount}/${state.hobbies.length}`} color={COLORS.warning} icon="leaf" />
+          <MemoStatCard COLORS={COLORS} label="Completed" value={completedCount} color={COLORS.success} icon="checkmark-circle" />
+          <MemoStatCard COLORS={COLORS} label="Active"    value={activeCount}    color={COLORS.accent}  icon="time-outline" />
+          <MemoStatCard COLORS={COLORS} label="Hobbies"   value={`${hobbiesTodayCount}/${state.hobbies.length}`} color={COLORS.warning} icon="leaf" />
         </View>
 
         {/* Hobbies */}
@@ -295,7 +325,7 @@ export default function DashboardScreen() {
             </View>
           ) : (
             sortedHobbies.map((h) => (
-              <HobbyRow key={h.id} hobby={h} onToggle={handleHobbyToggle} COLORS={COLORS} today={state.today} />
+              <MemoHobbyRow key={h.id} hobby={h} onToggle={handleHobbyToggle} COLORS={COLORS} today={state.today} />
             ))
           )}
         </View>
@@ -325,7 +355,7 @@ export default function DashboardScreen() {
             </View>
           ) : (
             todayTasks.map((task) => (
-              <TaskRow
+              <MemoTaskRow
                 key={task.id}
                 task={task}
                 categories={state.categories}
@@ -344,34 +374,29 @@ export default function DashboardScreen() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={{ paddingTop: SPACING.md, gap: SPACING.sm }}
           >
-            {state.categories.map((cat) => {
-              const catTasks = state.tasks.filter((t) => t.categoryId === cat.id);
-              const done = catTasks.filter((t) => t.status === 'completed').length;
-              const pct = catTasks.length ? Math.round((done / catTasks.length) * 100) : 0;
-              return (
-                <View
-                  key={cat.id}
-                  style={[
-                    styles.catCard,
-                    { backgroundColor: COLORS.surfaceAlt, borderColor: cat.color + '55' },
-                  ]}
-                >
-                  <Ionicons name={cat.icon} size={20} color={cat.color} />
-                  <Text style={[styles.catName, { color: cat.color }]} numberOfLines={1}>
-                    {cat.name}
-                  </Text>
-                  <Text style={[styles.catCount, { color: COLORS.text }]}>
-                    {done}/{catTasks.length}
-                  </Text>
-                  <View style={[styles.catBar, { backgroundColor: COLORS.border }]}>
-                    <View
-                      style={[styles.catBarFill, { width: `${pct}%`, backgroundColor: cat.color }]}
-                    />
-                  </View>
-                  <Text style={[styles.catPct, { color: COLORS.textMuted }]}>{pct}%</Text>
+            {categoryStats.map(({ cat, done, total, pct }) => (
+              <View
+                key={cat.id}
+                style={[
+                  styles.catCard,
+                  { backgroundColor: COLORS.surfaceAlt, borderColor: cat.color + '55' },
+                ]}
+              >
+                <Ionicons name={cat.icon} size={20} color={cat.color} />
+                <Text style={[styles.catName, { color: cat.color }]} numberOfLines={1}>
+                  {cat.name}
+                </Text>
+                <Text style={[styles.catCount, { color: COLORS.text }]}>
+                  {done}/{total}
+                </Text>
+                <View style={[styles.catBar, { backgroundColor: COLORS.border }]}>
+                  <View
+                    style={[styles.catBarFill, { width: `${pct}%`, backgroundColor: cat.color }]}
+                  />
                 </View>
-              );
-            })}
+                <Text style={[styles.catPct, { color: COLORS.textMuted }]}>{pct}%</Text>
+              </View>
+            ))}
 
             <TouchableOpacity
               style={[

@@ -3,12 +3,16 @@ import React, {
   useContext,
   useReducer,
   useEffect,
+  useMemo,
   useCallback,
   useRef,
 } from 'react';
 import { AppState, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Notifications from 'expo-notifications';
+import Notifications, {
+  ensureDefaultChannelAsync,
+  getDefaultChannelId,
+} from '../utils/notificationsClient';
 import { defaultCategoryColors } from '../utils/theme';
 import { todayKey, hasActivityToday, computeNextStreak } from '../utils/streak';
 import { scheduleMidnightLoop } from '../utils/midnight';
@@ -19,14 +23,11 @@ import { scheduleMidnightLoop } from '../utils/midnight';
 // and the sound goes to the default channel (often mute).
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    // expo-notifications 0.28 (SDK 51) reads ONLY `shouldShowAlert` from
-    // this object — and it defaults to false. The newer shouldShowBanner /
-    // shouldShowList keys are silently ignored by this version, so without
-    // shouldShowAlert a notification that fires while the app is open
-    // plays its sound but is never displayed anywhere.
-    shouldShowAlert: true,
-    // Kept for forward-compatibility: newer expo-notifications versions
-    // replace shouldShowAlert with the banner/list pair.
+    // SDK 57 (expo-notifications 2.x): the foreground display pair is
+    // shouldShowBanner (heads-up while the app is open) + shouldShowList
+    // (tray entry). On SDK 51 the pair was silently ignored and the
+    // deprecated shouldShowAlert key had to be used instead — see Bug 11
+    // in BUGS.md for that chapter of the history.
     shouldShowBanner: true,
     shouldShowList: true,
     shouldPlaySound: true,
@@ -35,25 +36,29 @@ Notifications.setNotificationHandler({
 });
 
 const DEFAULT_CHANNEL_ID = 'default';
+// Created once at module scope; ensureDefaultChannelAsync swallows the
+// rejection when the runtime lacks channel support (Expo Go) and remembers
+// the outcome — getDefaultChannelId() then returns null and decorate()
+// stops attaching a channelId, which matters because Android silently
+// drops notifications posted to a channel id that was never created.
 if (Platform.OS === 'android') {
-  Notifications.setNotificationChannelAsync(DEFAULT_CHANNEL_ID, {
+  ensureDefaultChannelAsync({
     name: 'Default',
     sound: 'default',
     enableVibrate: true,
     vibrationPattern: [0, 250, 250, 250],
     importance: Notifications.AndroidImportance.MAX,
-  }).catch((e) => {
-    console.warn('Failed to create notification channel:', e);
   });
 }
 
 // Helper to decorate a scheduled notification's content with the right
 // sound + channel id. Keeps the call-sites readable.
 function decorate(content) {
+  const channelId = getDefaultChannelId();
   return {
     ...content,
     sound: 'default',
-    ...(Platform.OS === 'android' ? { channelId: DEFAULT_CHANNEL_ID } : {}),
+    ...(Platform.OS === 'android' && channelId ? { channelId } : {}),
   };
 }
 
@@ -282,6 +287,32 @@ function pendingHobbyCount(hobbies, ref = new Date()) {
   return hobbies.filter((h) => !h.completions || !h.completions[k]).length;
 }
 
+// Rank used by the morning briefing: High first, then Medium, then Low.
+// Unknown/missing priorities rank with Medium so legacy tasks aren't dropped.
+const PRIORITY_RANK = { High: 0, Medium: 1, Low: 2 };
+
+// The briefing's task list: pending tasks sorted High → Low, oldest first
+// within each priority, capped at 5. Uses the same "still relevant today"
+// filter as pendingTaskCount (an expiry that passed before today's start
+// excludes the task).
+function topPendingTasks(tasks, ref = new Date(), limit = 5) {
+  const start = new Date(ref);
+  start.setHours(0, 0, 0, 0);
+  return tasks
+    .filter((t) => {
+      if (t.status !== 'pending') return false;
+      if (t.expiryDate && new Date(t.expiryDate) < start) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      const pa = PRIORITY_RANK[a.priority] ?? 1;
+      const pb = PRIORITY_RANK[b.priority] ?? 1;
+      if (pa !== pb) return pa - pb;
+      return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+    })
+    .slice(0, limit);
+}
+
 // ─── Notification helpers ──────────────────────────────────────────────────
 
 async function cancelByPredicate(predicate) {
@@ -297,35 +328,33 @@ async function cancelByPredicate(predicate) {
   }
 }
 
-// Schedule a single trigger at an absolute Date (used for the streak nudge
-// which is a one-shot, not a repeating notification).
+// Schedule a single trigger at an absolute Date (used for the streak nudge,
+// hobby reminders and per-task reminders — all one-shots, not repeating).
+// SDK 57 requires an explicit `type` discriminator on every trigger input.
 async function scheduleAt(date, content) {
   if (!date || date <= new Date()) return;
   try {
     await Notifications.scheduleNotificationAsync({
       content: decorate(content),
-      trigger: date,
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date,
+      },
     });
   } catch (e) {
     console.warn('scheduleAt error', e);
   }
 }
 
-// Schedule a repeating daily notification for one weekday.
-// `weekday` follows Expo's convention: 1 = Sunday, 7 = Saturday.
-async function scheduleWeekdayDaily({ weekday, hour, minute }, content) {
-  try {
-    await Notifications.scheduleNotificationAsync({
-      content: decorate(content),
-      trigger: { weekday, hour, minute, repeats: true },
-    });
-  } catch (e) {
-    console.warn('scheduleWeekdayDaily error', e);
-  }
-}
-
-// Convert a JS getDay() day (0=Sun..6=Sat) to Expo's weekday (1=Sun..7=Sat).
-const toExpoWeekday = (jsDay) => jsDay + 1;
+// ─── Hobby reminders ───────────────────────────────────────────────────────
+// Hobby reminders are rolling ONE-SHOTS for the next few days instead of
+// `repeats: true` dailies. A repeating trigger fires with fixed content and
+// cannot be skipped for "already completed today" — a one-shot per day can,
+// so a hobby finished before its reminder time stays silent for that day.
+// The window is re-rolled whenever hobbies change, on app foreground, and
+// at local midnight, so reminders keep coming as long as the app is opened
+// at least once per window.
+const HOBBY_ROLLING_DAYS = 7;
 
 export function AppProvider({ children }) {
   const [state, dispatch] = useReducer(appReducer, initialState);
@@ -423,10 +452,13 @@ export function AppProvider({ children }) {
           dispatch({ type: 'TICK_MIDNIGHT', payload: { today: newToday, midnightDate: now } });
         }
         recomputeStreak();
+        // Slide the hobby reminder window forward (covers the case where
+        // the app was closed long enough that every one-shot expired).
+        refreshHobbyReminders();
       }
     });
     return () => sub?.remove?.();
-  }, [recomputeStreak]);
+  }, [recomputeStreak, refreshHobbyReminders]);
 
   // ─── Local-midnight rollover (Bug 4) ─────────────────────────────────────
   // When the user keeps the app open across midnight, the streak
@@ -441,11 +473,21 @@ export function AppProvider({ children }) {
       if (newToday === todayRef.current) return;
       dispatch({ type: 'TICK_MIDNIGHT', payload: { today: newToday, midnightDate } });
       recomputeStreak();
+      // A new day un-completes every hobby — the reminder window must
+      // re-roll so yesterday's completions no longer suppress today's
+      // notifications.
+      refreshHobbyReminders();
     });
     return () => handle.cancel();
-  }, [recomputeStreak]);
+  }, [recomputeStreak, refreshHobbyReminders]);
 
   // ─── Notification scheduling helpers (forward-declared for actions) ─────
+  // (Re)schedules one hobby's reminder window: cancels every scheduled
+  // notification for this hobby, then books a one-shot at hobby.reminderTime
+  // for each of the next HOBBY_ROLLING_DAYS days that (a) is in the picked
+  // weekday set and (b) is NOT already completed — so a hobby checked off
+  // for today no longer rings today. Past times are skipped internally by
+  // scheduleAt, which also covers "reminder time already passed today".
   const scheduleHobbyReminder = useCallback(async (hobby) => {
     if (!hobby || !hobby.reminderTime) return;
     await cancelByPredicate(
@@ -455,17 +497,30 @@ export function AppProvider({ children }) {
     const days = Array.isArray(hobby.reminderDays) && hobby.reminderDays.length > 0
       ? hobby.reminderDays
       : [0, 1, 2, 3, 4, 5, 6];
-    for (const jsDay of days) {
-      await scheduleWeekdayDaily(
-        { weekday: toExpoWeekday(jsDay), hour: hh, minute: mm },
-        {
-          title: hobby.name,
-          body: 'Time to do your hobby!',
-          data: { kind: 'hobby-reminder', hobbyId: hobby.id },
-        },
-      );
+    const now = new Date();
+    for (let i = 0; i < HOBBY_ROLLING_DAYS; i++) {
+      const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
+      if (!days.includes(day.getDay())) continue;
+      const key = todayKey(day);
+      if (hobby.completions && hobby.completions[key]) continue;
+      const fire = new Date(day);
+      fire.setHours(hh, mm, 0, 0);
+      await scheduleAt(fire, {
+        title: hobby.name,
+        body: 'Time to do your hobby!',
+        data: { kind: 'hobby-reminder', hobbyId: hobby.id, date: key },
+      });
     }
   }, []);
+
+  // Re-roll the reminder window for every hobby that has one. Called on
+  // app foreground and at local midnight so the window slides forward even
+  // when nothing else changed.
+  const refreshHobbyReminders = useCallback(async () => {
+    for (const h of hobbiesRef.current) {
+      if (h.reminderTime) await scheduleHobbyReminder(h);
+    }
+  }, [scheduleHobbyReminder]);
 
   const cancelHobbyReminders = useCallback(async (hobbyId) => {
     await cancelByPredicate(
@@ -497,7 +552,11 @@ export function AppProvider({ children }) {
           body,
           data: { kind: 'tasks-reminder' },
         }),
-        trigger: { hour: hh, minute: mm, repeats: true },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DAILY,
+          hour: hh,
+          minute: mm,
+        },
       });
     } catch (e) {
       console.warn('tasks-reminder schedule error', e);
@@ -518,7 +577,16 @@ export function AppProvider({ children }) {
     const parts = [];
     if (tasks > 0) parts.push(`${tasks} pending task${tasks === 1 ? '' : 's'}`);
     if (hobbies > 0) parts.push(`${hobbies} hobby${hobbies === 1 ? '' : 's'} to do`);
-    const body = `Good morning! You have ${parts.join(' and ')} today.`;
+    let body = `Good morning! You have ${parts.join(' and ')} today.`;
+
+    // Append the day's most important pending work: top 5 tasks ordered
+    // High → Low priority, oldest first within each priority.
+    const top = topPendingTasks(tasksRef.current);
+    if (top.length > 0) {
+      body += '\n\nTop priorities:\n' + top
+        .map((t) => `• ${t.title} (${t.priority || 'Medium'})`)
+        .join('\n');
+    }
 
     try {
       await Notifications.scheduleNotificationAsync({
@@ -527,7 +595,11 @@ export function AppProvider({ children }) {
           body,
           data: { kind: 'morning-briefing' },
         }),
-        trigger: { hour: hh, minute: mm, repeats: true },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DAILY,
+          hour: hh,
+          minute: mm,
+        },
       });
     } catch (e) {
       console.warn('morning-briefing schedule error', e);
@@ -578,6 +650,18 @@ export function AppProvider({ children }) {
     rescheduleStreakNudge,
   ]);
 
+  // ─── Hobby reminder windows ──────────────────────────────────────────────
+  // Re-rolled whenever the hobby list changes — completion toggles
+  // included, so a hobby checked off for today stops ringing today (and
+  // un-checking it restores the reminder if the time hasn't passed). This
+  // effect also runs on the first load, migrating any legacy
+  // repeating-daily hobby schedules over to the rolling one-shot window.
+  // No initializedRef guard: a run before hydration sees no hobbies and
+  // is a no-op, and the LOAD_STATE run then schedules from real data.
+  useEffect(() => {
+    refreshHobbyReminders();
+  }, [state.hobbies, refreshHobbyReminders]);
+
   // ─── Task notification helpers ───────────────────────────────────────────
   // Cancel every notification previously scheduled for this task, then
   // re-schedule (a) the implicit "start soon" warning, and (b) whichever
@@ -600,7 +684,15 @@ export function AppProvider({ children }) {
       const scheduleOne = async (when, content) => {
         if (!when || when <= new Date()) return;
         try {
-          await Notifications.scheduleNotificationAsync({ content: decorate(content), trigger: when });
+          await Notifications.scheduleNotificationAsync({
+            content: decorate(content),
+            // SDK 57 rejects a bare Date trigger — every trigger input needs
+            // an explicit `type` discriminator (see Bug 16).
+            trigger: {
+              type: Notifications.SchedulableTriggerInputTypes.DATE,
+              date: when,
+            },
+          });
         } catch (e) {
           console.warn('scheduleOne error', e);
         }
@@ -645,113 +737,137 @@ export function AppProvider({ children }) {
   }, []);
 
   // ─── Actions ─────────────────────────────────────────────────────────────
-  const actions = {
-    addTask: useCallback(
-      (task) => {
-        const full = {
-          customReminderTime: null,
-          beforeExpiryMinutes: null,
-          ...task,
-        };
-        dispatch({ type: 'ADD_TASK', payload: full });
-        rescheduleTaskNotifications(full);
-      },
-      [rescheduleTaskNotifications],
-    ),
-    updateTask: useCallback(
-      (task) => {
-        dispatch({ type: 'UPDATE_TASK', payload: task });
-        rescheduleTaskNotifications(task);
-      },
-      [rescheduleTaskNotifications],
-    ),
-    completeTask: useCallback(async (id) => {
-      dispatch({ type: 'COMPLETE_TASK', payload: id });
-      // A completed task must not keep ringing later — drop every
-      // notification scheduled for it (custom one-shot, before-expiry,
-      // and the implicit 1hr-before-expiry warning alike).
-      await cancelByPredicate(
-        (n) => n.content?.data?.kind === 'task-reminder' && n.content?.data?.taskId === id,
-      );
-    }, []),
-    revertTask: useCallback((task) => {
-      dispatch({ type: 'REVERT_TASK', payload: task.id });
-      // Completion cancelled its notifications; re-schedule whichever
-      // reminder times are still in the future.
-      rescheduleTaskNotifications({ ...task, status: 'pending', completedAt: null });
-    }, [rescheduleTaskNotifications]),
-    deleteTask: useCallback(async (id) => {
-      dispatch({ type: 'DELETE_TASK', payload: id });
-      await cancelByPredicate(
-        (n) => n.content?.data?.kind === 'task-reminder' && n.content?.data?.taskId === id,
-      );
-    }, []),
+  // Memoized as a single stable bag: every entry is a stable useCallback,
+  // so `actions` (and therefore the context value below) keeps its identity
+  // for the provider's lifetime. Consumers re-render only when `state`
+  // actually changes, not on every provider render.
+  // Each action is a TOP-LEVEL useCallback — hooks must never be called
+  // inside the useMemo callback below (they would run conditionally,
+  // which violates the Rules of Hooks and crashes on recompute).
+  const addTask = useCallback(
+    (task) => {
+      const full = {
+        customReminderTime: null,
+        beforeExpiryMinutes: null,
+        ...task,
+      };
+      dispatch({ type: 'ADD_TASK', payload: full });
+      rescheduleTaskNotifications(full);
+    },
+    [rescheduleTaskNotifications],
+  );
+  const updateTask = useCallback(
+    (task) => {
+      dispatch({ type: 'UPDATE_TASK', payload: task });
+      rescheduleTaskNotifications(task);
+    },
+    [rescheduleTaskNotifications],
+  );
+  const completeTask = useCallback(async (id) => {
+    dispatch({ type: 'COMPLETE_TASK', payload: id });
+    // A completed task must not keep ringing later — drop every
+    // notification scheduled for it (custom one-shot, before-expiry,
+    // and the implicit 1hr-before-expiry warning alike).
+    await cancelByPredicate(
+      (n) => n.content?.data?.kind === 'task-reminder' && n.content?.data?.taskId === id,
+    );
+  }, []);
+  const revertTask = useCallback((task) => {
+    dispatch({ type: 'REVERT_TASK', payload: task.id });
+    // Completion cancelled its notifications; re-schedule whichever
+    // reminder times are still in the future.
+    rescheduleTaskNotifications({ ...task, status: 'pending', completedAt: null });
+  }, [rescheduleTaskNotifications]);
+  const deleteTask = useCallback(async (id) => {
+    dispatch({ type: 'DELETE_TASK', payload: id });
+    await cancelByPredicate(
+      (n) => n.content?.data?.kind === 'task-reminder' && n.content?.data?.taskId === id,
+    );
+  }, []);
 
-    addCategory: useCallback((cat) => {
-      dispatch({ type: 'ADD_CATEGORY', payload: cat });
-    }, []),
-    updateCategory: useCallback((cat) => {
-      dispatch({ type: 'UPDATE_CATEGORY', payload: cat });
-    }, []),
-    deleteCategory: useCallback((id) => {
-      dispatch({ type: 'DELETE_CATEGORY', payload: id });
-    }, []),
+  const addCategory = useCallback((cat) => {
+    dispatch({ type: 'ADD_CATEGORY', payload: cat });
+  }, []);
+  const updateCategory = useCallback((cat) => {
+    dispatch({ type: 'UPDATE_CATEGORY', payload: cat });
+  }, []);
+  const deleteCategory = useCallback((id) => {
+    dispatch({ type: 'DELETE_CATEGORY', payload: id });
+  }, []);
 
-    addHobby: useCallback(
-      (hobby) => {
-        const full = {
-          reminderTime: null,
-          reminderDays: null,
-          ...hobby,
-        };
-        dispatch({ type: 'ADD_HOBBY', payload: full });
-        if (full.reminderTime) scheduleHobbyReminder(full);
-      },
-      [scheduleHobbyReminder],
-    ),
-    updateHobby: useCallback(
-      (hobby) => {
-        dispatch({ type: 'UPDATE_HOBBY', payload: hobby });
-        if (hobby.reminderTime) scheduleHobbyReminder(hobby);
-        else cancelHobbyReminders(hobby.id);
-      },
-      [scheduleHobbyReminder, cancelHobbyReminders],
-    ),
-    deleteHobby: useCallback(
-      async (id) => {
-        dispatch({ type: 'DELETE_HOBBY', payload: id });
-        await cancelHobbyReminders(id);
-      },
-      [cancelHobbyReminders],
-    ),
-    toggleHobbyToday: useCallback((id, date) => {
-      dispatch({ type: 'TOGGLE_HOBBY_TODAY', payload: { id, date } });
-    }, []),
+  const addHobby = useCallback(
+    (hobby) => {
+      const full = {
+        reminderTime: null,
+        reminderDays: null,
+        ...hobby,
+      };
+      dispatch({ type: 'ADD_HOBBY', payload: full });
+      if (full.reminderTime) scheduleHobbyReminder(full);
+    },
+    [scheduleHobbyReminder],
+  );
+  const updateHobby = useCallback(
+    (hobby) => {
+      dispatch({ type: 'UPDATE_HOBBY', payload: hobby });
+      if (hobby.reminderTime) scheduleHobbyReminder(hobby);
+      else cancelHobbyReminders(hobby.id);
+    },
+    [scheduleHobbyReminder, cancelHobbyReminders],
+  );
+  const deleteHobby = useCallback(
+    async (id) => {
+      dispatch({ type: 'DELETE_HOBBY', payload: id });
+      await cancelHobbyReminders(id);
+    },
+    [cancelHobbyReminders],
+  );
+  const toggleHobbyToday = useCallback((id, date) => {
+    dispatch({ type: 'TOGGLE_HOBBY_TODAY', payload: { id, date } });
+  }, []);
 
-    updateSettings: useCallback((patch) => {
-      dispatch({ type: 'UPDATE_SETTINGS', payload: patch });
-    }, []),
+  const updateSettings = useCallback((patch) => {
+    dispatch({ type: 'UPDATE_SETTINGS', payload: patch });
+  }, []);
 
-    // Backup restore: replace the whole state with a (pre-validated)
-    // payload. Routed through LOAD_STATE so the reducer's migration +
-    // sanitization (task field backfill, settings merge, today stamp)
-    // runs on the imported blob exactly as it does on launch. The OS has
-    // no memory of the imported tasks/hobbies, so every reminder is
-    // re-scheduled from scratch (past triggers are skipped internally).
-    restoreData: useCallback(
-      (payload) => {
-        dispatch({ type: 'LOAD_STATE', payload });
-        for (const t of payload?.tasks || []) rescheduleTaskNotifications(t);
-        for (const h of payload?.hobbies || []) {
-          if (h.reminderTime) scheduleHobbyReminder(h);
-        }
-      },
-      [rescheduleTaskNotifications, scheduleHobbyReminder],
-    ),
-  };
+  // Backup restore: replace the whole state with a (pre-validated)
+  // payload. Routed through LOAD_STATE so the reducer's migration +
+  // sanitization (task field backfill, settings merge, today stamp)
+  // runs on the imported blob exactly as it does on launch. The OS has
+  // no memory of the imported tasks/hobbies, so every reminder is
+  // re-scheduled from scratch (past triggers are skipped internally).
+  const restoreData = useCallback(
+    (payload) => {
+      dispatch({ type: 'LOAD_STATE', payload });
+      for (const t of payload?.tasks || []) rescheduleTaskNotifications(t);
+      for (const h of payload?.hobbies || []) {
+        if (h.reminderTime) scheduleHobbyReminder(h);
+      }
+    },
+    [rescheduleTaskNotifications, scheduleHobbyReminder],
+  );
+
+  const actions = useMemo(() => ({
+    addTask,
+    updateTask,
+    completeTask,
+    revertTask,
+    deleteTask,
+    addCategory,
+    updateCategory,
+    deleteCategory,
+    addHobby,
+    updateHobby,
+    deleteHobby,
+    toggleHobbyToday,
+    updateSettings,
+    restoreData,
+  }), [addTask, updateTask, completeTask, revertTask, deleteTask, addCategory, updateCategory, deleteCategory, addHobby, updateHobby, deleteHobby, toggleHobbyToday, updateSettings, restoreData]);
+
+  const value = useMemo(() => ({ state, ...actions }), [state, actions]);
 
   return (
-    <AppContext.Provider value={{ state, ...actions }}>
+    <AppContext.Provider value={value}>
       {children}
     </AppContext.Provider>
   );

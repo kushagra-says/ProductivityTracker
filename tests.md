@@ -153,6 +153,7 @@ TESTS
 [SWIPE-05]  [MANUAL] — static snapshot of adjacent page slides in during drag; page springs back if swipe incomplete
 [SWIPE-06]  [MANUAL] — swipe unavailable while a task/category is being created or edited
 [SWIPE-07]  [MANUAL] — swipe past outer edges does nothing, no white background
+[SWIPE-08]  [MANUAL] — failed swipe springs back with the preview sliding out in lockstep (Bug 25)
 
 [BACK-01]   [MANUAL] — system back on a tab list returns to Dashboard
 [BACK-02]   [MANUAL] — system back on Dashboard pops "Leave the app?" dialog
@@ -172,6 +173,7 @@ TESTS
 
 [NAV-01]    PASS — tab order matches bar order
 [NAV-02]    PASS — settings opens from header
+[NAV-03]    [MANUAL] — no white flash on any stack push or pop (both themes)
 [CAT-01]    PASS — add/edit/delete category works
 [TASK-A01]  PASS — create task with all fields
 [TASK-A02]  PASS — edit task preserves id
@@ -422,8 +424,8 @@ Used by the task custom reminder, the hobby reminder, the settings times (via
 - **Expected:** Tab does not change.
 
 ### SWIPE-03 — Short swipe is ignored
-- **Steps:** Swipe left across 12% of the screen width.
-- **Expected:** Tab does not change.
+- **Steps:** Swipe left across 12% of the screen width and release. Then repeat while the gesture is interrupted (e.g. touch briefly stolen mid-drag). Also repeat several times in a row quickly (spring → immediately swipe again).
+- **Expected:** Tab does not change, and the page always springs back to centre — including on a cancelled gesture, where it must not stay frozen at the dragged offset (Bug 20). The recenter must also never wedge the gesture: every swipe after a spring-back still works on the first try.
 
 ### SWIPE-04 — Swipe disabled in stack screens
 - **Pre-conditions:** On AddTask (a stack screen inside the Tasks tab).
@@ -431,9 +433,14 @@ Used by the task custom reminder, the hobby reminder, the settings times (via
 - **Expected:** Tab does not change.
 
 ### SWIPE-05 — Static adjacent-page snapshot and spring back **[MANUAL]**
-- **Pre-conditions:** Any tab is active; wait ~2–3 s after launch (background snapshot capture of all tabs). Revisit swipes must NOT need this wait — the snapshot cache persists across tab switches.
+- **Pre-conditions:** Any tab is active. There is NO post-launch wait: tabs not yet visited have no snapshot, and their preview shows a plain label fallback until they are visited once (Bug 24 — the cache is filled only by the blur-time capture; no background rig).
 - **Steps:** Slowly drag the page left, watching the screen; release halfway without passing the threshold. Then repeat with a full swipe past ~35%. Also: switch to another tab, come back, and swipe again immediately.
-- **Expected:** While dragging, the current page slides with the finger and a cached STATIC SNAPSHOT of the adjacent tab slides in over it from the swipe edge, so the pages look physically adjacent. The gesture stays smooth — no screen mounts mid-swipe — and the preview appears INSTANTLY on revisit swipes (no label fallback flashing mid-swipe; the label only appears in the first seconds after launch, or right after a data/theme change while the background re-capture runs). After completing or editing a task/hobby, the affected previews refresh within a couple of seconds. The preview is read-only — it can't be tapped or scrolled. Releasing short: the page springs back to place, no tab change. Passing the threshold: the page glides off-screen with an eased animation as the preview expands to cover the screen, then the tab switches seamlessly underneath — no hard cut.
+- **Expected:** While dragging, the current page slides with the finger and a cached STATIC SNAPSHOT of the adjacent tab slides in over it from the swipe edge, so the pages look physically adjacent. The snapshot is laid out at exactly the live page's size (the takeover from preview to real page after a passing swipe is invisible except for interactivity — no re-flow, no "load then adjust", Bug 21), and at the moving boundary it shows the incoming page's physically-adjacent edge in BOTH directions (right-swipe shows the left page's trailing edge; left-swipe its leading edge). Changing swipe direction or target mid-gesture must never flash the OTHER page's content inside the panel (Bug 22); the adjacent snapshots are prefetched when the tab gains focus (`Image.prefetch`, no extra views, nothing inside the gesture), so the panel's bitmap is warm and the preview appears with no decode gap in EITHER direction. The gesture stays smooth — no screens mount mid-swipe, no capture runs during a drag (Bug 24). The preview is read-only — it can't be tapped or scrolled. Releasing short: the page springs back to place, no tab change. Passing the threshold: the page glides off-screen with an eased animation as the preview expands to cover the screen, then the tab switches seamlessly underneath — no hard cut.
+
+### SWIPE-08 — Failed-swipe spring-back animation **[MANUAL]**
+- **Pre-conditions:** Any tab with an adjacent page is active (a snapshot exists for the adjacent tab — visit it once first).
+- **Steps:** Drag the page past the point where the preview panel is clearly visible, then release WITHOUT passing the ~35% threshold. Watch the return.
+- **Expected:** The page springs back to rest with a rubber-band ease (a slight bounce past centre is fine), WHILE the preview panel slides back out of the swipe edge in lockstep — the failed swipe reads as the page pushing the preview back out of the screen, never as the preview vanishing instantly at release (Bug 25). After the return the page is exactly at rest and the tab is unchanged.
 
 ### SWIPE-06 — Swipe unavailable during create/edit **[MANUAL]**
 - **Pre-conditions:** On AddTask (creating a task), then on Edit Hobby, then on Edit Category.
@@ -444,6 +451,16 @@ Used by the task custom reminder, the hobby reminder, the settings times (via
 - **Pre-conditions:** On the Dashboard tab, then on the Insights tab.
 - **Steps:** On Dashboard, swipe right (there is no tab before Home). On Insights, swipe left (there is no tab after Insights).
 - **Expected:** The page does not move at all — no preview, no motion — and the background stays the themed app background (no white flash).
+
+### SWIPE-08 — No flash of the previous page after a completed swipe **[MANUAL]**
+- **Pre-conditions:** Any tab with a warm snapshot cache; watch closely (the artifact is a single frame).
+- **Steps:** Swipe fully to the adjacent tab several times, in both directions, at various speeds.
+- **Expected:** After the completion animation the target page stays on screen — the previous page never reappears for an instant between the preview panel's dismissal and the tab swap (Bug 18).
+
+### SWIPE-09 — Preview matches the page's latest activity **[MANUAL]**
+- **Pre-conditions:** On Tasks with enough tasks to scroll.
+- **Steps:** Scroll the list partway down (or apply a status/category filter), swipe to the adjacent tab, then swipe back.
+- **Expected:** The incoming preview shows the page exactly as it was left — same scroll position and the applied filter still visible — not the default top-of-list fresh state (Bug 19). Same for tab-bar navigation: leave via the tab bar and swipe back into the tab.
 
 ---
 
@@ -497,6 +514,10 @@ still governs them.
 ### NAV-02 — Settings opens from header
 - **Steps:** On the dashboard, tap the gear icon.
 - **Expected:** `Settings` screen opens (the RootStack, not a tab).
+
+### NAV-03 — No white flash on any stack push or pop **[MANUAL]**
+- **Steps:** Open New Task, close it. Open a hobby's details, close it. Open Edit Hobby, close it. Edit a category, close it. Edit a task, close it. Repeat in the dark and cream themes.
+- **Expected:** Every push and pop shows only themed colours — no white (or any non-theme) frame before the screen's content paints, in either direction (Bug 23).
 
 ### CAT-01 — Add / edit / delete category
 - **Steps:** Create a category. Edit its color. Delete it.
@@ -732,6 +753,111 @@ Export writes a versioned JSON envelope (`format: productivity-tracker-backup`, 
 ### BAK-07 — Non-backup JSON / newer version rejected **[MANUAL]**
 - **Steps:** Hand-edit a backup to `"version": 99` and import.
 - **Expected:** Toast says the backup version is newer than the app supports.
+
+---
+
+## P. Task list — priority display (Bug 12)
+
+### PRIO-01 — Priority chip in the meta row **[MANUAL]**
+- **Pre-conditions:** At least one task of each priority (High / Medium / Low), all pending.
+- **Steps:** Open the Tasks tab and inspect each card's meta row (category chip row).
+- **Expected:** Next to the category chip a compact chip shows the priority — a radio dot followed by the label: `High` in the danger colour, `Medium` in the warning colour, `Low` in the success colour. The dot is a plain filled circle in the priority's colour (no arrow/hyphen icon glyphs). The card height is unchanged from before the priority feature: the status pill stays alone in the top-right with no empty band between the title and the meta row (Bug 17).
+
+### PRIO-02 — Priority shows for completed and expired tasks **[MANUAL]**
+- **Pre-conditions:** One completed and one expired task.
+- **Steps:** Filter to `Completed` and `Expired`.
+- **Expected:** Both cards still show their set priority chip in the meta row (struck/muted title does not hide it).
+
+### PRIO-03 — Legacy task without a priority falls back to Medium **[MANUAL]**
+- **Pre-conditions:** A task stored before priorities existed (or with `priority: undefined`).
+- **Steps:** Open the Tasks tab.
+- **Expected:** The card shows `Medium` rather than an empty pill or a crash.
+
+---
+
+## Q. Accent options (Bug 13)
+
+### ACC-01 — Eight accents in dark, nine in cream **[MANUAL]**
+- **Pre-conditions:** Any state.
+- **Steps:** Settings → Accent Color in dark mode, then toggle the theme and look again.
+- **Expected:** Dark shows 8 cards (purple, teal, rose, amber, blue, coral, lime, fuchsia); cream shows the same 8 plus **brown**. Purple stays highlighted as the default on first open.
+
+### ACC-02 — New accents apply to both themes **[MANUAL]**
+- **Pre-conditions:** Any state.
+- **Steps:** Pick each new accent (blue, coral, lime, fuchsia) in both dark and cream.
+- **Expected:** Buttons, chips, tab bar and highlights re-tint live in both themes; the cream variants hold their hue on the beige background (no washed-out or vibrating colours).
+
+### ACC-03 — Per-theme memory + backup round-trip includes new keys **[MANUAL]**
+- **Pre-conditions:** Pick `blue` in dark and `lime` in cream.
+- **Steps:** Toggle between themes a few times; export a backup; import it back.
+- **Expected:** Each theme restores its own new-key accent after toggling, and the imported backup restores both choices.
+
+---
+
+## R. Morning briefing — top priorities (Bug 14)
+
+### BRIEF-01 — Briefing lists top 5 pending tasks **[MANUAL]**
+- **Pre-conditions:** Morning briefing enabled, ≥ 5 pending tasks with mixed priorities, time set ~2 min in the future.
+- **Steps:** Wait for the briefing.
+- **Expected:** The body starts with the familiar counts, then "Top priorities:" and up to 5 lines, each `• <task title> (<priority>)`.
+
+### BRIEF-02 — Ordering is High → Low, oldest first within each priority **[MANUAL]**
+- **Pre-conditions:** Pending tasks: two old High, one newer High, one Medium, one Low.
+- **Steps:** Read the briefing list order.
+- **Expected:** The three High tasks appear first (oldest created at the top), then Medium, then Low.
+
+### BRIEF-03 — Fewer than 5 / zero tasks **[MANUAL]**
+- **Pre-conditions:** (a) 2 pending tasks; (b) 0 pending tasks but ≥ 1 pending hobby.
+- **Steps:** Wait for a briefing in each case.
+- **Expected:** (a) The list shows just the 2 tasks. (b) The briefing still sends with counts only — no "Top priorities" block.
+
+---
+
+## S. Hobby reminder skips completed days (Bug 15)
+
+### HOBBY-01 — Completed hobby stays silent at its reminder time **[MANUAL]**
+- **Pre-conditions:** A hobby with a reminder ~2 min in the future.
+- **Steps:** Mark the hobby done today; leave the app open (or background it) past the reminder time.
+- **Expected:** No notification for that hobby today.
+
+### HOBBY-02 — Un-checking before the reminder time restores it **[MANUAL]**
+- **Pre-conditions:** The hobby from HOBBY-01, un-checked, reminder still in the future.
+- **Steps:** Un-mark today; wait past the reminder time.
+- **Expected:** The notification fires as usual.
+
+### HOBBY-03 — Tomorrow still reminds after today is completed **[MANUAL]**
+- **Pre-conditions:** The hobby from HOBBY-01 after its (suppressed) reminder time has passed.
+- **Steps:** Check the scheduled notifications (or wait until tomorrow's reminder time with the app opened at least once today).
+- **Expected:** A one-shot for tomorrow exists; after midnight the hobby rings at its normal time.
+
+### HOBBY-04 — Weekday selection and window re-roll **[MANUAL]**
+- **Pre-conditions:** A hobby with a reminder limited to specific weekdays.
+- **Steps:** Toggle today's completion, then inspect scheduled notifications (or observe over two days).
+- **Expected:** Only picked weekdays appear in the window; toggling today's completion re-rolls the window without duplicating notifications.
+
+---
+
+## T. Expo SDK 57 migration — notifications runtime (Bug 16)
+
+### MIG-01 — Boot in Expo Go with local notifications intact **[MANUAL]**
+- **Pre-conditions:** Current Expo Go (SDK ≥ 53, Android).
+- **Steps:** Launch the app in Expo Go (`npx expo start`, scan the QR).
+- **Expected:** No crash; the app opens to the Dashboard. Console shows the "local-notification subset" info line (not a crash, not the "unavailable" warning). Task/hobby/streak/briefing reminders schedule and fire as normal — only push (which the app never used) is unavailable. Channel creation logs an info line (channels are stubbed in Expo Go) and no `channelId` is attached to scheduled notifications.
+
+### MIG-01b — Custom channel in a development build **[MANUAL]**
+- **Pre-conditions:** A development client built against SDK 57.
+- **Steps:** Launch the app, then check the app's Android notification channels (Settings → App → Notifications).
+- **Expected:** The `default` channel exists with high importance and the configured vibration pattern; scheduled reminders carry `channelId: 'default'`.
+
+### MIG-02 — Per-task reminders schedule on SDK 57 **[MANUAL]**
+- **Pre-conditions:** Any runtime (Expo Go or SDK 57 dev client).
+- **Steps:** Create a task with an expiry and a before-expiry reminder; then create one with a custom one-shot reminder.
+- **Expected:** Both reminders appear in the OS scheduled-notifications list and fire at their times (Bug 16, cause 2).
+
+### MIG-03 — Existing reminder surface unchanged **[MANUAL]**
+- **Pre-conditions:** Any runtime with at least one task, one hobby reminder, and the daily plan/briefing enabled.
+- **Steps:** Let the reminders fire (or inspect the scheduled list).
+- **Expected:** Task reminders, hobby rolling one-shots, streak nudge, "today's plan", and the morning briefing all behave as documented in sections A–S; sound + vibration intact via the `default` channel.
 
 ---
 

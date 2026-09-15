@@ -6,9 +6,6 @@
     "orientation": "portrait",
     "icon": "src/components/icon.png",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "backgroundColor": "#0D0D0F"
-    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.yourname.productivitytracker"
@@ -25,6 +22,7 @@
       ]
     },
     "plugins": [
+      ["expo-splash-screen", { "backgroundColor": "#0D0D0F" }],
       [
         "expo-notifications",
         {
@@ -32,7 +30,8 @@
           "color": "#7C6FFF",
           "sounds": []
         }
-      ]
+      ],
+      "expo-font"
     ],
     "extra": {
       "eas": {

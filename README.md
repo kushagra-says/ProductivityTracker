@@ -8,7 +8,7 @@ ProductivityTracker is a single-user, on-device productivity journal. It doesn't
 - Track daily hobbies with streaks, longest streaks, and a full year history.
 - Watch a streak number on the dashboard grow as you keep up with *either* tasks or hobbies.
 - See your work as charts (per-category, per-priority, 7-day bars, monthly lines).
-- Switch between a polished dark mode and a warm cream mode, with four (or five) accent colors to choose from.
+- Switch between a polished dark mode and a warm cream mode, with ten accent colors to choose from in both.
 - Get real notifications — sound and vibration — when a reminder fires.
 
 ---
@@ -23,6 +23,7 @@ ProductivityTracker is a single-user, on-device productivity journal. It doesn't
   - **Custom one-shot** — pick any future date and time.
 - Auto-expire: any task whose expiry has passed flips to `expired` automatically.
 - Filter by status (`pending / completed / expired`) and category, search by name.
+- Each task card shows its status pill in the top-right, with the set priority as a compact chip in the meta row next to the category (a radio dot in the priority's colour plus the label) — no extra card height.
 - Every task tracks `createdAt`, `updatedAt`, and `completedAt` timestamps shown relative to "now".
 
 ### 🌿 Hobby Tracker
@@ -33,7 +34,7 @@ ProductivityTracker is a single-user, on-device productivity journal. It doesn't
 - Stats: current streak, longest streak, total days completed.
 - **All-time history grid** — a year of weeks, day-of-week gutter, month labels on top. Only the days up to today are drawn, never future days.
 - A scrollable **monthly chart** that complements the year grid for the most recent month.
-- Per-hobby reminder — pick time of day and which weekdays, stored as a `HH:mm` + a day-of-week array.
+- Per-hobby reminder — pick time of day and which weekdays, stored as a `HH:mm` + a day-of-week array. A hobby that is already completed for the day does not notify.
 
 ### 🔥 Streaks
 - A single global **day streak** on the dashboard header that grows whenever the user earns *any* activity (task completion *or* a hobby check) on a consecutive day.
@@ -58,7 +59,7 @@ ProductivityTracker is a single-user, on-device productivity journal. It doesn't
 ### 🎨 Themes
 - Two full palettes: **dark** (deep slate) and **cream** (warm beige), each polished and consistent.
 - Toggle from the dashboard header (sun/moon icon) — choice persists.
-- Four accent colors for dark mode (purple, teal, rose, amber). Cream mode adds a fifth: **brown**.
+- Ten accent colors in both themes (purple, teal, rose, amber, blue, coral, lime, fuchsia, mint, brown) — each tuned per palette, so dark's brown is a lighter shade that stays visible on near-black.
 - Per-theme accent memory: pick `teal` in dark and `brown` in cream, and both stick when you switch back.
 - System status bar follows the theme.
 
@@ -66,15 +67,13 @@ ProductivityTracker is a single-user, on-device productivity journal. It doesn't
 - Three local notification channels of behavior:
   - **Task reminders** (before expiry, custom one-shot, implicit 1 hr before expiry if the user hasn't picked one).
   - **Daily "today's plan"** reminder at a time you pick — body reflects pending tasks/hobbies for the day.
-  - **Morning briefing** at a time you pick — gentle start-of-day summary.
+  - **Morning briefing** at a time you pick — gentle start-of-day summary that lists the day's top 5 pending tasks, ordered High → Low priority with the oldest first within each priority.
   - **Streak-at-risk nudge** — fires the same day if you have a streak ≥ 1 and haven't done anything yet.
-- Hobby daily reminders with selectable weekdays.
+- Hobby daily reminders with selectable weekdays — rolling one-shot schedules that skip days the hobby is already completed, re-armed on every hobby change, app foreground, and midnight.
 - On Android: a single high-importance channel is created at app start so sound + vibration actually fire.
 - All notification content is decorated with the right channel id / sound for the platform.
 
 ### ✨ Polish
-- **Swipe between pages** — a horizontal swipe on any of the five tabs moves to the adjacent page, with a cached static snapshot of the next page sliding in so the pages look physically adjacent. The gesture never fights vertical list scrolling, outer-edge swipes are impossible, and swiping is locked while a create/edit form is open.
-- Smooth swipe completion — a passing swipe glides off-screen with an eased animation before the tab switches underneath.
 - **Android back flow** — system back on a tab list returns to the Dashboard; a second back from the Dashboard asks before leaving the app.
 - **Unsaved-changes guard** — leaving Add/Edit Task, Edit Hobby, or Edit Category with unsaved edits asks first; manually reverting every change does not.
 - Card-as-button UX: date and reminder cards expand/toggle from a tap anywhere on the card, with a `×` that clears without bubbling.
@@ -164,13 +163,12 @@ Open bugs are tracked in [`BUGS.md`](./BUGS.md). Every bug gets a test in `tests
 
 ## 🧰 Tech Stack
 
-- **React Native** `0.74.5` + **Expo** `~51.0.0`
-- **React Navigation** (`bottom-tabs` + `stack`)
+- **React Native** `0.86.3` + **Expo SDK 57** + **React 19**
+- **React Navigation v7** (`bottom-tabs` + `stack`)
 - **AsyncStorage** for local persistence
-- **expo-notifications** for local reminders
-- **react-native-svg** + **react-native-chart-kit** for charts
-- **react-native-gesture-handler** for swipes and pulls
-- **react-native-view-shot** for cached swipe-preview snapshots
+- **expo-notifications 2.x** for local reminders (typed `date` / `daily` triggers)
+- **react-native-svg** for charts
+- **react-native-gesture-handler** for pull-to-refresh
 - **date-fns** for date math (streak, year grid, monthly chart)
 - Zero remote services. Zero analytics. Zero ads.
 
@@ -209,7 +207,6 @@ ProductivityTracker/
     │   ├── InsightsScreen.js     # Charts, range filter, breakdown
     │   └── SettingsScreen.js     # Theme toggle + accent picker
     ├── components/
-    │   ├── TabSwipe.js           # Swipe-between-tabs HOC + snapshot preview cache
     │   ├── LineChart.js          # Reusable SVG line chart primitive
     │   ├── MonthlyCategoryLineChart.js
     │   ├── HobbyMonthlyChart.js  # Per-hobby monthly view
@@ -239,14 +236,14 @@ ProductivityTracker/
 
 Open Settings from the gear icon in the dashboard header to:
 - Switch between dark and cream themes.
-- Pick an accent color (purple / teal / rose / amber, or `brown` in cream). The choice is remembered per theme.
+- Pick an accent color (purple / teal / rose / amber / blue / coral / lime / fuchsia / mint / brown — the same ten in both themes). The choice is remembered per theme.
 
 ---
 
 ## 💾 Data
 
 - All app data is stored on-device under the AsyncStorage key `@pt_state`.
-- **Backup / restore** — Settings → Data: export everything (tasks, hobbies, categories, streak, settings, accent choices) as a versioned JSON file to your device's Downloads folder, and import a backup later to restore it. Import validates the file, asks before replacing, and re-arms all reminders from the restored data.
+- **Backup / restore** — Settings → Data: export everything (tasks, hobbies, categories, streak, settings, accent choices) as a versioned JSON file to your device's Downloads folder, and import a backup later to restore it. Import validates the file, asks before replacing, and re-arms all reminders from the restored data. (Uses the `expo-file-system/legacy` API — StorageAccessFramework is not part of the new File/Directory model in recent Expo versions.)
 - Reinstalling over the existing app keeps your tasks, hobbies, categories, and streak intact.
 - The accent choice is stored under `@pt_accent_per_theme` (with a one-time migration from the legacy `@pt_accent`).
 - Hobby completion history is preserved indefinitely and powers the all-time stats and year grid.
@@ -264,6 +261,7 @@ Open Settings from the gear icon in the dashboard header to:
 ## 📝 Notes
 
 - Notifications only fire on real devices (Expo Go on a simulator will not vibrate or play sound).
+- **Expo Go since SDK 53 cannot serve push notifications** — its binary binds `ExpoPushTokenManager` to a throwing stub, which makes importing the full `expo-notifications` package crash the app at startup. This app's `notificationsClient` detects that and loads the local-notification submodules directly instead, so all reminders keep working in Expo Go; a development build (`eas build --profile development`) provides the complete native module set.
 - All data is stored locally via AsyncStorage — there is no server, no sync, and no telemetry.
 - Old task data with `walkSessions` is loaded harmlessly and dropped on first save.
 - The app respects the user's local day boundary — streak math, hobby "today" checks, and the auto-expire sweep all roll over at local midnight.

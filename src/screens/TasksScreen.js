@@ -100,9 +100,18 @@ export default function TasksScreen() {
     expired:   { color: COLORS.danger,  label: 'Expired', icon: 'alert-circle' },
   };
 
+  // Same colors the Add/Edit screen uses for its priority chips. Missing
+  // priority (legacy tasks) falls back to Medium.
+  const priorityConfig = {
+    High:   { color: COLORS.danger },
+    Medium: { color: COLORS.warning },
+    Low:    { color: COLORS.success },
+  };
+
   const renderTask = ({ item: task }) => {
     const cat = state.categories.find((c) => c.id === task.categoryId);
     const sc = statusConfig[task.status] || statusConfig.pending;
+    const pc = priorityConfig[task.priority] || priorityConfig.Medium;
     const isUrgent =
       task.status === 'pending' &&
       task.expiryDate &&
@@ -133,6 +142,9 @@ export default function TasksScreen() {
             >
               {task.title}
             </Text>
+            {/* Status pill — the priority lives in the meta row below the
+                title, next to the category chip, so the card keeps its
+                single-row height (Bug 17). */}
             <View style={[styles.statusPill, { backgroundColor: sc.color + '22' }]}>
               <Ionicons name={sc.icon} size={10} color={sc.color} />
               <Text style={[styles.statusText, { color: sc.color }]}>{sc.label}</Text>
@@ -152,6 +164,13 @@ export default function TasksScreen() {
                 <Text style={[styles.catChipText, { color: cat.color }]}>{cat.name}</Text>
               </View>
             )}
+            <View style={[styles.catChip, { backgroundColor: pc.color + '22' }]}>
+              {/* Radio dot in the priority's color (Bug 21) — no icon glyphs. */}
+              <View style={[styles.priDot, { backgroundColor: pc.color }]} />
+              <Text style={[styles.catChipText, { color: pc.color }]}>
+                {task.priority || 'Medium'}
+              </Text>
+            </View>
             {task.expiryDate && (
               <Text style={[styles.metaText, { color: isUrgent ? COLORS.warning : COLORS.textMuted }]}>
                 {isUrgent ? 'Due ' : 'Due '}
@@ -414,6 +433,7 @@ const styles = StyleSheet.create({
   },
   catChip:     { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: RADIUS.pill, paddingHorizontal: 8, paddingVertical: 2 },
   catChipText: { fontSize: 11, fontWeight: '700' },
+  priDot:      { width: 7, height: 7, borderRadius: 4 },
   metaText:    { fontSize: 11 },
   timestamp:   { fontSize: 10, marginBottom: 10 },
 

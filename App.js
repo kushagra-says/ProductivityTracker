@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AppState, BackHandler, Platform } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { AppState, BackHandler, Platform, View } from 'react-native';
+import { DarkTheme, DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { StatusBar } from 'expo-status-bar';
@@ -11,7 +11,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { AppProvider } from './src/context/AppContext';
 import { ToastProvider } from './src/context/ToastContext';
 import { ThemeProvider, useTheme } from './src/utils/theme';
-import { withTabSwipe, registerPeekScreen } from './src/components/TabSwipe';
 import ConfirmDialog from './src/components/ConfirmDialog';
 
 import DashboardScreen       from './src/screens/DashboardScreen';
@@ -28,32 +27,14 @@ import SettingsScreen        from './src/screens/SettingsScreen';
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
-// Bug 7 — swipe left/right switches between the five main tabs. Only the
-// five list screens are wrapped; stack screens (AddTask, HobbyDetail,
-// EditCategory, …) are left alone — and stackGuard additionally refuses
-// to navigate when the tab's own stack holds a pushed screen. Defined at
-// module level so the wrapped component types are stable across MainTabs
-// re-renders.
-const SwipeableDashboard  = withTabSwipe(DashboardScreen,  'Dashboard');
-const SwipeableTasksList  = withTabSwipe(TasksScreen,      'Tasks',      { stackGuard: true });
-const SwipeableCategories = withTabSwipe(CategoriesScreen, 'Categories', { stackGuard: true });
-const SwipeableHobbies    = withTabSwipe(HobbiesScreen,    'Hobbies',    { stackGuard: true });
-const SwipeableInsights   = withTabSwipe(InsightsScreen,   'Insights');
-
-// The swipe preview shows a cached STATIC SNAPSHOT of the adjacent tab.
-// The plain screen (no swipe wrapper, no nested navigator) is registered
-// so the hidden capture rig can screenshot it after focus — without
-// firing navigation focus events that would re-trigger captures.
-registerPeekScreen('Dashboard',  DashboardScreen);
-registerPeekScreen('Tasks',      TasksScreen);
-registerPeekScreen('Categories', CategoriesScreen);
-registerPeekScreen('Hobbies',    HobbiesScreen);
-registerPeekScreen('Insights',   InsightsScreen);
+// Tab switching is via the bottom tab bar. The swipe-between-tabs gesture
+// was removed: the preview-cover choreography could not be made flash-free
+// on device alongside react-native-screens' managed tab switching.
 
 function TaskStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="TasksList" component={SwipeableTasksList} />
+      <Stack.Screen name="TasksList" component={TasksScreen} />
       <Stack.Screen name="AddTask"   component={AddTaskScreen} />
     </Stack.Navigator>
   );
@@ -62,7 +43,7 @@ function TaskStack() {
 function HobbiesStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="HobbiesList"  component={SwipeableHobbies} />
+      <Stack.Screen name="HobbiesList"  component={HobbiesScreen} />
       <Stack.Screen name="HobbyDetail"  component={HobbyDetailScreen} />
       <Stack.Screen name="EditHobby"    component={EditHobbyScreen} />
     </Stack.Navigator>
@@ -72,7 +53,7 @@ function HobbiesStack() {
 function CategoryStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="CategoriesList" component={SwipeableCategories} />
+      <Stack.Screen name="CategoriesList" component={CategoriesScreen} />
       <Stack.Screen name="EditCategory"   component={EditCategoryScreen} />
     </Stack.Navigator>
   );
@@ -93,6 +74,11 @@ function MainTabs() {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
+        // Themed native screen container. BottomTabView passes sceneStyle
+        // straight to the react-native-screens Screen, which otherwise has
+        // no background — the native default (white) would show for the
+        // frame(s) before a tab's themed content paints (Bug 23).
+        sceneStyle: { backgroundColor: COLORS.bg },
         tabBarStyle: {
           backgroundColor: COLORS.surface,
           borderTopColor:  COLORS.border,
@@ -116,11 +102,11 @@ function MainTabs() {
         },
       })}
     >
-      <Tab.Screen name="Dashboard"  component={SwipeableDashboard}  options={{ tabBarLabel: 'Home' }} />
+      <Tab.Screen name="Dashboard"  component={DashboardScreen}  options={{ tabBarLabel: 'Home' }} />
       <Tab.Screen name="Tasks"      component={TaskStack}        />
       <Tab.Screen name="Categories" component={CategoryStack}   />
       <Tab.Screen name="Hobbies"    component={HobbiesStack}     />
-      <Tab.Screen name="Insights"   component={SwipeableInsights}   />
+      <Tab.Screen name="Insights"   component={InsightsScreen}   />
     </Tab.Navigator>
   );
 }
@@ -128,15 +114,45 @@ function MainTabs() {
 const RootStack = createStackNavigator();
 
 function Navigation({ navRef }) {
-  const { mode } = useTheme();
+  const { COLORS, mode } = useTheme();
+
+  // The navigation theme drives the NATIVE screen containers: stack cards
+  // are painted with theme.colors.background (@react-navigation/stack
+  // CardContainer), and tab screens with our sceneStyle above. Without a
+  // theme the library default (near-white) was the container colour, so
+  // every push/pop/tab switch flashed white for the frame(s) before the
+  // screen's own themed content painted (Bug 23).
+  const navTheme = {
+    ...(mode === 'dark' ? DarkTheme : DefaultTheme),
+    dark: mode === 'dark',
+    colors: {
+      ...(mode === 'dark' ? DarkTheme.colors : DefaultTheme.colors),
+      primary: COLORS.accent,
+      background: COLORS.bg,
+      card: COLORS.surface,
+      text: COLORS.text,
+      border: COLORS.border,
+      notification: COLORS.danger,
+    },
+  };
+
   return (
-    <>
+    <NavigationContainer ref={navRef} theme={navTheme}>
       <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
-      <RootStack.Navigator screenOptions={{ headerShown: false }}>
-        <RootStack.Screen name="Main"     component={MainTabs} />
-        <RootStack.Screen name="Settings" component={SettingsScreen} />
-      </RootStack.Navigator>
-    </>
+      {/* Themed root for EVERYTHING inside the navigator. Every layer
+          between the themed screens and the Android activity window
+          (this view, the gesture root, the providers) is otherwise
+          transparent, so the window background — white in Expo's default
+          activity theme — showed through during a root-stack push/pop,
+          i.e. opening and closing Settings (Bug 23b). With this fill,
+          any layer that has not yet painted shows the app background. */}
+      <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
+        <RootStack.Navigator screenOptions={{ headerShown: false }}>
+          <RootStack.Screen name="Main"     component={MainTabs} />
+          <RootStack.Screen name="Settings" component={SettingsScreen} />
+        </RootStack.Navigator>
+      </View>
+    </NavigationContainer>
   );
 }
 
@@ -195,9 +211,7 @@ export default function App() {
         <ThemeProvider>
           <ToastProvider>
             <AppProvider>
-              <NavigationContainer ref={navRef}>
-                <Navigation navRef={navRef} />
-              </NavigationContainer>
+              <Navigation navRef={navRef} />
               <ConfirmDialog
                 visible={exitVisible}
                 title="Leave the app?"

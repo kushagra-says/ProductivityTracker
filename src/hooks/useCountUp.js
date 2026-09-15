@@ -29,6 +29,10 @@ export function useCountUp(value, duration = 600) {
 
     return () => {
       if (rafId.current) cancelAnimationFrame(rafId.current);
+      // Interrupted by a new value mid-animation: baseline the NEXT
+      // animation at the previous target (not the original start), so the
+      // counter eases onward instead of visually jumping backwards.
+      prev.current = to;
     };
   }, [value, duration]);
 

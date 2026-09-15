@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -107,31 +107,43 @@ export const SHADOW = {
 // Default is `purple` so existing users see no change.
 
 export const ACCENTS = {
-  purple: { accent: '#7C6FFF', accentLight: '#A89DFF', accentDim: '#2A2456', outlineAccent: '#7C6FFF75' },
-  teal:   { accent: '#3FC8C0', accentLight: '#7FE3DD', accentDim: '#163F3D', outlineAccent: '#3FC8C075' },
-  rose:   { accent: '#E5638E', accentLight: '#F09DB7', accentDim: '#4A1F30', outlineAccent: '#E5638E75' },
-  amber:  { accent: '#F2A03D', accentLight: '#FFC074', accentDim: '#4A2F0E', outlineAccent: '#F2A03D75' },
+  purple:  { accent: '#7C6FFF', accentLight: '#A89DFF', accentDim: '#2A2456', outlineAccent: '#7C6FFF75' },
+  teal:    { accent: '#3FC8C0', accentLight: '#7FE3DD', accentDim: '#163F3D', outlineAccent: '#3FC8C075' },
+  rose:    { accent: '#E5638E', accentLight: '#F09DB7', accentDim: '#4A1F30', outlineAccent: '#E5638E75' },
+  amber:   { accent: '#F2A03D', accentLight: '#FFC074', accentDim: '#4A2F0E', outlineAccent: '#F2A03D75' },
+  blue:    { accent: '#4E9CFF', accentLight: '#8FBEFF', accentDim: '#152F52', outlineAccent: '#4E9CFF75' },
+  coral:   { accent: '#FF7A59', accentLight: '#FFA98F', accentDim: '#4C2115', outlineAccent: '#FF7A5975' },
+  lime:    { accent: '#A8D63F', accentLight: '#C9EC8B', accentDim: '#2E3A12', outlineAccent: '#A8D63F75' },
+  fuchsia: { accent: '#D65DE8', accentLight: '#E9A0F2', accentDim: '#3F1447', outlineAccent: '#D65DE875' },
+  mint:    { accent: '#34D399', accentLight: '#7BE8BC', accentDim: '#14432F', outlineAccent: '#34D39975' },
+  brown:   { accent: '#B5824F', accentLight: '#D4A878', accentDim: '#3A2812', outlineAccent: '#B5824F75' },
 };
 
 // Cream-palette accent overrides — same role, tuned for warm backgrounds.
-// 'brown' is cream-only on purpose: dark-mode users get the same Purple
-// slot labeled "Purple", cream users see a fifth card that disappears
-// when they switch back to dark.
+// Both grids show the same ten accents; the dark 'brown' is tuned lighter
+// than the cream one (#B5824F vs #7A4E2D) because a shade that reads as
+// brown on warm beige disappears into the near-black dark background.
 //
 // Note: the cream 'purple' MUST read as purple on a warm beige bg. The
 // previous #9B7B5D was brown, which made the picker lie about what the
 // user had selected. #7B5BC9 is a deep amethyst that holds its hue on
 // cream while staying soft enough not to vibrate against the warm bg.
 export const ACCENTS_CREAM = {
-  purple: { accent: '#7B5BC9', accentLight: '#A98DE0', accentDim: '#E5DDF2', outlineAccent: '#7B5BC955' },
-  brown:  { accent: '#7A4E2D', accentLight: '#A37352', accentDim: '#EFE0D2', outlineAccent: '#7A4E2D55' },
-  teal:   { accent: '#2F8A86', accentLight: '#5BB1AC', accentDim: '#D6EAE8', outlineAccent: '#2F8A8655' },
-  rose:   { accent: '#B0405E', accentLight: '#D27893', accentDim: '#F0D5DD', outlineAccent: '#B0405E55' },
-  amber:  { accent: '#C97A1F', accentLight: '#E5A256', accentDim: '#F5E2C8', outlineAccent: '#C97A1F55' },
+  purple:  { accent: '#7B5BC9', accentLight: '#A98DE0', accentDim: '#E5DDF2', outlineAccent: '#7B5BC955' },
+  teal:    { accent: '#2F8A86', accentLight: '#5BB1AC', accentDim: '#D6EAE8', outlineAccent: '#2F8A8655' },
+  rose:    { accent: '#B0405E', accentLight: '#D27893', accentDim: '#F0D5DD', outlineAccent: '#B0405E55' },
+  amber:   { accent: '#C97A1F', accentLight: '#E5A256', accentDim: '#F5E2C8', outlineAccent: '#C97A1F55' },
+  blue:    { accent: '#2B6FC4', accentLight: '#6FA0DC', accentDim: '#DAE7F6', outlineAccent: '#2B6FC455' },
+  coral:   { accent: '#C2573B', accentLight: '#DC8A72', accentDim: '#F4DDD5', outlineAccent: '#C2573B55' },
+  lime:    { accent: '#6E9422', accentLight: '#9DC15E', accentDim: '#E7EFDA', outlineAccent: '#6E942255' },
+  fuchsia: { accent: '#A645B8', accentLight: '#CB87D9', accentDim: '#F0DCF4', outlineAccent: '#A645B855' },
+  mint:    { accent: '#1E9E6E', accentLight: '#57BE96', accentDim: '#D8EDE2', outlineAccent: '#1E9E6E55' },
+  brown:   { accent: '#7A4E2D', accentLight: '#A37352', accentDim: '#EFE0D2', outlineAccent: '#7A4E2D55' },
 };
 
-// Visible accent keys per theme. The dark grid is fixed; the cream grid
-// gains 'brown'. The picker reads from this list at render time.
+// Visible accent keys per theme. Both grids now show the same ten accents
+// (brown is available in dark as well, tuned lighter than the cream shade).
+// The picker reads from this list at render time.
 export const ACCENT_KEYS_DARK = Object.keys(ACCENTS);
 export const ACCENT_KEYS_CREAM = Object.keys(ACCENTS_CREAM);
 // Back-compat alias — code that doesn't care which theme can still use this.
@@ -205,10 +217,9 @@ export function ThemeProvider({ children }) {
 
   const setAccentChoice = useCallback(
     (key) => {
-      // Only accept keys that are visible in the CURRENT theme. The dark
-      // picker never exposes 'brown', so a dark-mode user can't pick it
-      // and we don't need to worry about storing a value that's invalid
-      // for either mode.
+      // Only accept keys that are visible in the CURRENT theme — both
+      // grids now expose the same ten accents, so any key is valid for
+      // either mode.
       const valid = mode === 'dark' ? ACCENT_KEYS_DARK : ACCENT_KEYS_CREAM;
       if (!valid.includes(key)) return;
       setAccentByMode((prev) => {
@@ -221,9 +232,9 @@ export function ThemeProvider({ children }) {
   );
 
   // Restore an accent-per-theme map from a backup import. Validates each
-  // side against its own theme's key set (cream accepts 'brown', dark
-  // doesn't) and applies live — unlike setAccentChoice, which only writes
-  // the active theme.
+  // side against its own theme's key set (both accept the same ten keys
+  // since brown became a dark accent too) and applies live — unlike
+  // setAccentChoice, which only writes the active theme.
   const applyAccentMap = useCallback((map) => {
     if (!map || typeof map !== 'object') return;
     let touched = false;
@@ -248,24 +259,33 @@ export function ThemeProvider({ children }) {
   const accent = accentByMode[mode];
   const accentOverride =
     (mode === 'dark' ? ACCENTS : ACCENTS_CREAM)[accent] || ACCENTS.purple;
-  const COLORS = { ...basePalette, ...accentOverride };
+  // Memoized: a new COLORS object every provider render would re-render
+  // EVERY useTheme() consumer (i.e. every screen) even when the palette
+  // did not change.
+  const COLORS = useMemo(
+    () => ({ ...basePalette, ...accentOverride }),
+    [basePalette, accentOverride],
+  );
 
-  // The visible accent keys for the picker. Dark shows the original four;
-  // cream shows the four PLUS a 'brown' row.
+  // The visible accent keys for the picker. Both themes show the same
+  // ten accents now that dark exposes 'brown' as well.
   const visibleAccentKeys = mode === 'dark' ? ACCENT_KEYS_DARK : ACCENT_KEYS_CREAM;
 
+  const themeValue = useMemo(
+    () => ({
+      COLORS,
+      mode,
+      accent,
+      visibleAccentKeys,
+      toggleThemeMode,
+      setAccentChoice,
+      applyAccentMap,
+    }),
+    [COLORS, mode, accent, visibleAccentKeys, toggleThemeMode, setAccentChoice, applyAccentMap],
+  );
+
   return (
-    <ThemeContext.Provider
-      value={{
-        COLORS,
-        mode,
-        accent,
-        visibleAccentKeys,
-        toggleThemeMode,
-        setAccentChoice,
-        applyAccentMap,
-      }}
-    >
+    <ThemeContext.Provider value={themeValue}>
       {children}
     </ThemeContext.Provider>
   );

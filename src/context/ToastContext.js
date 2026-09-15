@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -39,14 +39,20 @@ export function ToastProvider({ children }) {
     [opacity, translateY, hide],
   );
 
-  const value = {
-    toast: show,
-    success: useCallback((m) => show(m, COLORS.success), [show, COLORS.success]),
-    danger:  useCallback((m) => show(m, COLORS.danger),  [show, COLORS.danger]),
-    // Alias of danger — the validation call-sites all say `toast.error`.
-    error:   useCallback((m) => show(m, COLORS.danger),  [show, COLORS.danger]),
-    info:    useCallback((m) => show(m, COLORS.accent),  [show, COLORS.accent]),
-  };
+  // Memoized so every useToast() consumer keeps the same function identities
+  // across toast show/hide cycles — consumers re-render only when the theme
+  // (and thus the callback colors) changes.
+  const value = useMemo(
+    () => ({
+      toast: show,
+      success: (m) => show(m, COLORS.success),
+      danger:  (m) => show(m, COLORS.danger),
+      // Alias of danger — the validation call-sites all say `toast.error`.
+      error:   (m) => show(m, COLORS.danger),
+      info:    (m) => show(m, COLORS.accent),
+    }),
+    [show, COLORS.success, COLORS.danger, COLORS.accent],
+  );
 
   return (
     <ToastContext.Provider value={value}>
