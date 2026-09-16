@@ -1,17 +1,26 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
 import { format, isPast } from 'date-fns';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { useTheme, FONTS, RADIUS, SHADOW, SPACING } from '../utils/theme';
+import { useTabNav } from '../tabNav';
+import { APP_VERSION } from '../utils/appVersion';
 import { relTime } from '../utils/relTime';
 import { useCountUp } from '../hooks/useCountUp';
 import { usePullRefresh } from '../hooks/usePullRefresh';
+
+// "See now" permanently silences the dashboard What's-new card; the seen
+// version is stored, so the card auto-reappears when APP_VERSION is bumped
+// (the per-release ritual lives in src/utils/whatsNew.js). "View later"
+// hides it for this session only (no write) — it is back on the next app
+// open.
+const WHATS_NEW_SEEN_KEY = '@pt_whatsnew_seen';
 
 function StatCard({ label, value, color, icon, COLORS }) {
   return (
@@ -164,10 +173,28 @@ const MemoHobbyRow = React.memo(HobbyRow);
 
 export default function DashboardScreen() {
   const { state, completeTask, toggleHobbyToday } = useApp();
-  const navigation = useNavigation();
+  const tabNav = useTabNav();
   const { COLORS, mode, toggleThemeMode } = useTheme();
   const toast = useToast();
   const { refreshing, onRefresh } = usePullRefresh();
+
+  // What's-new reminder: shown on every app open until the user taps
+  // "See now" (persisted per APP_VERSION); "View later" hides it for this
+  // session only.
+  const [showWhatsNew, setShowWhatsNew] = useState(false);
+  useEffect(() => {
+    AsyncStorage.getItem(WHATS_NEW_SEEN_KEY)
+      .then((seen) => { if (seen !== APP_VERSION) setShowWhatsNew(true); })
+      .catch(() => setShowWhatsNew(true));
+  }, []);
+
+  // "See now" — silence for good, then deep-link into Settings, which
+  // auto-scrolls to the What's-New card via the route param.
+  const seeWhatsNew = () => {
+    setShowWhatsNew(false);
+    AsyncStorage.setItem(WHATS_NEW_SEEN_KEY, APP_VERSION).catch(() => {});
+    tabNav.openSettings({ highlightWhatsNew: true });
+  };
 
   const stats = useMemo(() => {
     const tasks = state.tasks;
@@ -286,12 +313,53 @@ export default function DashboardScreen() {
 
             <TouchableOpacity
               style={[styles.themeBtn, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}
-              onPress={() => navigation.getParent()?.navigate('Settings')}
+              onPress={() => tabNav.openSettings()}
             >
               <Ionicons name="settings-outline" size={18} color={COLORS.textSub} />
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* What's-new reminder — per launch until "See now" silences it.
+            GENERIC copy on purpose (see src/utils/whatsNew.js): this card
+            never mentions the update's content, so it needs no editing per
+            release — only APP_VERSION and the Settings list change. */}
+        {showWhatsNew && (
+          <View
+            style={[
+              styles.whatsNewCard,
+              { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.accent + '66' },
+            ]}
+          >
+            <View style={styles.whatsNewHead}>
+              <Ionicons name="sparkles" size={15} color={COLORS.accent} />
+              <Text style={[styles.whatsNewTitle, { color: COLORS.text }]}>
+                New update installed
+              </Text>
+            </View>
+            <Text style={[styles.whatsNewBody, { color: COLORS.textSub }]}>
+              See what's new in this version.
+            </Text>
+            <View style={styles.whatsNewActions}>
+              <TouchableOpacity
+                style={[styles.wnLater, { backgroundColor: COLORS.surface, borderColor: COLORS.border }]}
+                onPress={() => setShowWhatsNew(false)}
+              >
+                <Text style={{ color: COLORS.textMuted, fontSize: 13, fontWeight: '600' }}>
+                  View later
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.wnNow, { backgroundColor: COLORS.accent }]}
+                onPress={seeWhatsNew}
+              >
+                <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>
+                  See now
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         {/* Stats */}
         <View style={styles.statsRow}>
@@ -304,7 +372,7 @@ export default function DashboardScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: COLORS.text }]}>Today's hobbies</Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Hobbies')}>
+            <TouchableOpacity onPress={() => tabNav.jumpTo('Hobbies')}>
               <Text style={[styles.seeAll, { color: COLORS.accent }]}>Manage</Text>
             </TouchableOpacity>
           </View>
@@ -317,7 +385,7 @@ export default function DashboardScreen() {
               </Text>
               <TouchableOpacity
                 style={[styles.addBtn, { backgroundColor: COLORS.accent }]}
-                onPress={() => navigation.navigate('Hobbies')}
+                onPress={() => tabNav.jumpTo('Hobbies')}
               >
                 <Ionicons name="add" size={16} color="#fff" />
                 <Text style={styles.addBtnText}>Add hobby</Text>
@@ -334,7 +402,7 @@ export default function DashboardScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: COLORS.text }]}>Upcoming tasks</Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Tasks')}>
+            <TouchableOpacity onPress={() => tabNav.jumpTo('Tasks')}>
               <Text style={[styles.seeAll, { color: COLORS.accent }]}>See all</Text>
             </TouchableOpacity>
           </View>
@@ -347,7 +415,7 @@ export default function DashboardScreen() {
               </Text>
               <TouchableOpacity
                 style={[styles.addBtn, { backgroundColor: COLORS.accent }]}
-                onPress={() => navigation.navigate('Tasks', { screen: 'AddTask' })}
+                onPress={() => tabNav.navigateInTab('Tasks', 'AddTask')}
               >
                 <Ionicons name="add" size={16} color="#fff" />
                 <Text style={styles.addBtnText}>Add task</Text>
@@ -403,7 +471,7 @@ export default function DashboardScreen() {
                 styles.addCatCard,
                 { backgroundColor: COLORS.surface, borderColor: COLORS.border, borderStyle: 'dashed' },
               ]}
-              onPress={() => navigation.navigate('Categories')}
+              onPress={() => tabNav.jumpTo('Categories')}
             >
               <Ionicons name="add" size={26} color={COLORS.textMuted} />
               <Text style={[styles.addCatText, { color: COLORS.textMuted }]}>New</Text>
@@ -420,6 +488,15 @@ export default function DashboardScreen() {
 const styles = StyleSheet.create({
   safe:      { flex: 1 },
   container: { flex: 1, paddingHorizontal: SPACING.lg },
+
+  // What's-new reminder card (dashboard header section).
+  whatsNewCard:    { borderWidth: 1, borderRadius: RADIUS.lg, padding: SPACING.md, marginBottom: SPACING.lg },
+  whatsNewHead:    { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  whatsNewTitle:   { fontSize: 14, fontWeight: '700' },
+  whatsNewBody:    { fontSize: 12, lineHeight: 18 },
+  whatsNewActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: SPACING.sm, marginTop: SPACING.md },
+  wnLater:         { paddingHorizontal: 14, paddingVertical: 8, borderRadius: RADIUS.md, borderWidth: 1 },
+  wnNow:           { paddingHorizontal: 14, paddingVertical: 8, borderRadius: RADIUS.md },
 
   header: {
     flexDirection: 'row',

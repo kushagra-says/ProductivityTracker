@@ -1,17 +1,18 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, BackHandler, Platform, View } from 'react-native';
 import { DarkTheme, DefaultTheme, NavigationContainer } from '@react-navigation/native';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { NavigationIndependentTree } from '@react-navigation/core';
 import { createStackNavigator } from '@react-navigation/stack';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { Ionicons } from '@expo/vector-icons';
 
 import { AppProvider } from './src/context/AppContext';
 import { ToastProvider } from './src/context/ToastContext';
 import { ThemeProvider, useTheme } from './src/utils/theme';
 import ConfirmDialog from './src/components/ConfirmDialog';
+import TabPager, { PagerBridge, usePagerInternals } from './src/components/TabPager';
+import { createTabNavState, TAB_NAMES } from './src/tabNav';
 
 import DashboardScreen       from './src/screens/DashboardScreen';
 import TasksScreen           from './src/screens/TasksScreen';
@@ -24,105 +25,16 @@ import InsightsScreen        from './src/screens/InsightsScreen';
 import EditCategoryScreen    from './src/screens/EditCategoryScreen';
 import SettingsScreen        from './src/screens/SettingsScreen';
 
-const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
-// Tab switching is via the bottom tab bar. The swipe-between-tabs gesture
-// was removed: the preview-cover choreography could not be made flash-free
-// on device alongside react-native-screens' managed tab switching.
-
-function TaskStack() {
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="TasksList" component={TasksScreen} />
-      <Stack.Screen name="AddTask"   component={AddTaskScreen} />
-    </Stack.Navigator>
-  );
-}
-
-function HobbiesStack() {
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="HobbiesList"  component={HobbiesScreen} />
-      <Stack.Screen name="HobbyDetail"  component={HobbyDetailScreen} />
-      <Stack.Screen name="EditHobby"    component={EditHobbyScreen} />
-    </Stack.Navigator>
-  );
-}
-
-function CategoryStack() {
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="CategoriesList" component={CategoriesScreen} />
-      <Stack.Screen name="EditCategory"   component={EditCategoryScreen} />
-    </Stack.Navigator>
-  );
-}
-
-const TAB_ICONS = {
-  Dashboard:  { active: 'grid',           inactive: 'grid-outline' },
-  Tasks:      { active: 'checkmark-circle',inactive: 'checkmark-circle-outline' },
-  Categories: { active: 'folder',         inactive: 'folder-outline' },
-  Hobbies:    { active: 'leaf',           inactive: 'leaf-outline' },
-  Insights:   { active: 'stats-chart',    inactive: 'stats-chart-outline' },
-};
-
-function MainTabs() {
+// Themed navigation theme for every navigator (root + the per-page
+// containers below): stack cards are painted with theme.colors.background
+// (@react-navigation/stack CardContainer); without it the library default
+// (near-white) was the container colour, so every push/pop flashed white
+// for the frame(s) before the screen's own themed content painted (Bug 23).
+function useNavTheme() {
   const { COLORS, mode } = useTheme();
-
-  return (
-    <Tab.Navigator
-      screenOptions={({ route }) => ({
-        headerShown: false,
-        // Themed native screen container. BottomTabView passes sceneStyle
-        // straight to the react-native-screens Screen, which otherwise has
-        // no background — the native default (white) would show for the
-        // frame(s) before a tab's themed content paints (Bug 23).
-        sceneStyle: { backgroundColor: COLORS.bg },
-        tabBarStyle: {
-          backgroundColor: COLORS.surface,
-          borderTopColor:  COLORS.border,
-          borderTopWidth: 1,
-          paddingBottom: 8,
-          paddingTop: 6,
-          height: 66,
-        },
-        tabBarActiveTintColor:   COLORS.accent,
-        tabBarInactiveTintColor: COLORS.textMuted,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600', letterSpacing: 0.4 },
-        tabBarIcon: ({ focused, color, size }) => {
-          const set = TAB_ICONS[route.name] || { active: 'ellipse', inactive: 'ellipse-outline' };
-          return (
-            <Ionicons
-              name={focused ? set.active : set.inactive}
-              size={size || 22}
-              color={color}
-            />
-          );
-        },
-      })}
-    >
-      <Tab.Screen name="Dashboard"  component={DashboardScreen}  options={{ tabBarLabel: 'Home' }} />
-      <Tab.Screen name="Tasks"      component={TaskStack}        />
-      <Tab.Screen name="Categories" component={CategoryStack}   />
-      <Tab.Screen name="Hobbies"    component={HobbiesStack}     />
-      <Tab.Screen name="Insights"   component={InsightsScreen}   />
-    </Tab.Navigator>
-  );
-}
-
-const RootStack = createStackNavigator();
-
-function Navigation({ navRef }) {
-  const { COLORS, mode } = useTheme();
-
-  // The navigation theme drives the NATIVE screen containers: stack cards
-  // are painted with theme.colors.background (@react-navigation/stack
-  // CardContainer), and tab screens with our sceneStyle above. Without a
-  // theme the library default (near-white) was the container colour, so
-  // every push/pop/tab switch flashed white for the frame(s) before the
-  // screen's own themed content painted (Bug 23).
-  const navTheme = {
+  return useMemo(() => ({
     ...(mode === 'dark' ? DarkTheme : DefaultTheme),
     dark: mode === 'dark',
     colors: {
@@ -134,7 +46,112 @@ function Navigation({ navRef }) {
       border: COLORS.border,
       notification: COLORS.danger,
     },
-  };
+  }), [COLORS, mode]);
+}
+
+// Stack tabs keep their react-navigation stacks (pushed screens and the
+// unsaved-changes guard are unchanged); they only report their depth to the
+// pager shell (back handler + swipe-disable) and register their navigate fn
+// so Dashboard's jump-and-push shortcut reaches them.
+//
+// Each stack lives in its OWN NavigationContainer wrapped in
+// NavigationIndependentTree: the pager hosts all three stacks under ONE
+// Screen (Main) of the root stack, and react-navigation only allows one
+// navigator per Screen/scene (EnsureSingleNavigator) — hosting three plain
+// navigators there throws "Another navigator is already registered".
+// Independent containers each bring their own registry. Consequences,
+// all accounted for:
+// - State is per-container and fully preserved (pages never unmount).
+// - Android back: every NavigationContainer wires its own back handler.
+//   Handlers run in reverse registration order, but a container can only
+//   pop while its page's stack has depth > 1 — and the pager is disabled
+//   exactly then (see TabPager's pagerEnabled), so a depth > 1 stack is
+//   always the FOCUSED page and popping it is correct. Every other
+//   container's handler is a no-op that returns false, and App's own
+//   handler runs last-registered/first and decides tab-level back first.
+// - No linking: each container runs with linking disabled (no prefixes).
+
+function TaskStack() {
+  const { onDepth } = usePagerInternals();
+  const theme = useNavTheme();
+  return (
+    <NavigationIndependentTree>
+      <NavigationContainer theme={theme}>
+        <Stack.Navigator
+          screenOptions={{ headerShown: false }}
+          onStateChange={(st) => onDepth('Tasks', st?.routes.length ?? 1)}
+        >
+          <Stack.Screen name="TasksList">
+            {(props) => (
+              <>
+                <PagerBridge tabName="Tasks" navigation={props.navigation} />
+                <TasksScreen {...props} />
+              </>
+            )}
+          </Stack.Screen>
+          <Stack.Screen name="AddTask" component={AddTaskScreen} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </NavigationIndependentTree>
+  );
+}
+
+function HobbiesStack() {
+  const { onDepth } = usePagerInternals();
+  const theme = useNavTheme();
+  return (
+    <NavigationIndependentTree>
+      <NavigationContainer theme={theme}>
+        <Stack.Navigator
+          screenOptions={{ headerShown: false }}
+          onStateChange={(st) => onDepth('Hobbies', st?.routes.length ?? 1)}
+        >
+          <Stack.Screen name="HobbiesList"  component={HobbiesScreen} />
+          <Stack.Screen name="HobbyDetail"  component={HobbyDetailScreen} />
+          <Stack.Screen name="EditHobby"    component={EditHobbyScreen} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </NavigationIndependentTree>
+  );
+}
+
+function CategoryStack() {
+  const { onDepth } = usePagerInternals();
+  const theme = useNavTheme();
+  return (
+    <NavigationIndependentTree>
+      <NavigationContainer theme={theme}>
+        <Stack.Navigator
+          screenOptions={{ headerShown: false }}
+          onStateChange={(st) => onDepth('Categories', st?.routes.length ?? 1)}
+        >
+          <Stack.Screen name="CategoriesList" component={CategoriesScreen} />
+          <Stack.Screen name="EditCategory"   component={EditCategoryScreen} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </NavigationIndependentTree>
+  );
+}
+
+const RootStack = createStackNavigator();
+
+// The five main pages in pager order. Dashboard first (index 0) — the
+// Android back flow lands here before exiting; the tab bar labels/icons
+// live in TabPager.
+const PAGES = [
+  { name: 'Dashboard',  label: 'Home',       element: <DashboardScreen /> },
+  { name: 'Tasks',      label: 'Tasks',      element: <TaskStack /> },
+  { name: 'Categories', label: 'Categories', element: <CategoryStack /> },
+  { name: 'Hobbies',    label: 'Hobbies',    element: <HobbiesStack /> },
+  { name: 'Insights',   label: 'Insights',   element: <InsightsScreen /> },
+];
+
+function Navigation({ navRef, tabStateRef, pagerRef }) {
+  const { COLORS, mode } = useTheme();
+
+  // Tab pages are plain pager views now — TabPager themes their containers
+  // directly; the root theme drives this stack's cards (see useNavTheme).
+  const navTheme = useNavTheme();
 
   return (
     <NavigationContainer ref={navRef} theme={navTheme}>
@@ -148,7 +165,9 @@ function Navigation({ navRef }) {
           any layer that has not yet painted shows the app background. */}
       <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
         <RootStack.Navigator screenOptions={{ headerShown: false }}>
-          <RootStack.Screen name="Main"     component={MainTabs} />
+          <RootStack.Screen name="Main">
+            {() => <TabPager navRef={navRef} tabStateRef={tabStateRef} pagerRef={pagerRef} pages={PAGES} />}
+          </RootStack.Screen>
           <RootStack.Screen name="Settings" component={SettingsScreen} />
         </RootStack.Navigator>
       </View>
@@ -167,6 +186,9 @@ function Navigation({ navRef }) {
 // navigator's default handling.
 export default function App() {
   const navRef = useRef(null);
+  // Shared with TabPager: focused page index + stack depths per tab.
+  const tabStateRef = useRef(createTabNavState());
+  const pagerRef = useRef(null);
   const [exitVisible, setExitVisible] = useState(false);
 
   useEffect(() => {
@@ -176,17 +198,14 @@ export default function App() {
       if (!st) return false;
       // Settings pushed on the root stack — let it pop normally.
       if (st.routes.length > 1) return false;
-      const mainRoute = st.routes.find((r) => r.name === 'Main');
-      const tabState = mainRoute?.state;
-      if (!tabState) return false;
-      const active = tabState.routes[tabState.index];
-      // A pushed screen inside the tab's own stack (AddTask, HobbyDetail,
-      // EditHobby, EditCategory) — default pop; the unsaved-changes guard
-      // asks before discarding there.
-      if (active?.state && active.state.routes.length > 1) return false;
-      // Tab list → dashboard first; dashboard → confirm exit.
-      if (active?.name !== 'Dashboard') {
-        navRef.current?.navigate('Main', { screen: 'Dashboard' });
+      // A pushed screen inside the focused page's own stack (AddTask,
+      // HobbyDetail, EditHobby, EditCategory) — default pop; the
+      // unsaved-changes guard asks before discarding there.
+      const tabs = tabStateRef.current;
+      if ((tabs.depths[TAB_NAMES[tabs.index]] ?? 1) > 1) return false;
+      // Tab page → dashboard first; dashboard → confirm exit.
+      if (tabs.index !== 0) {
+        pagerRef.current?.setPage(0);
         return true;
       }
       setExitVisible(true);
@@ -211,7 +230,7 @@ export default function App() {
         <ThemeProvider>
           <ToastProvider>
             <AppProvider>
-              <Navigation navRef={navRef} />
+              <Navigation navRef={navRef} tabStateRef={tabStateRef} pagerRef={pagerRef} />
               <ConfirmDialog
                 visible={exitVisible}
                 title="Leave the app?"

@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform,
   Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 // SDK 57 moved the readAsString/writeAsString/SAF API into the `legacy`
 // subpath — the new top-level API is a File/Directory class model that has
@@ -20,6 +20,7 @@ import { ACCENT_STORAGE_KEY } from '../utils/theme';
 import InlineTimePicker from '../components/InlineTimePicker';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { APP_VERSION } from '../utils/appVersion';
+import { WHATS_NEW } from '../utils/whatsNew';
 import {
   buildBackup, parseBackup, backupFileName,
 } from '../utils/backup';
@@ -27,14 +28,6 @@ import {
 // Remembered SAF directory (the user's Downloads folder) so exports
 // after the first one don't re-ask for the folder.
 const BACKUP_DIR_KEY = '@pt_backup_dir';
-
-// Features shipped in the unpushed batch, shown in Settings (WHAT'S NEW).
-const WHATS_NEW = [
-  'Task cards now show the set priority right in the list, next to the category',
-  'More accent colors to choose from — ten accents in both themes',
-  'Morning briefing now lists the day’s top 5 oldest pending tasks, high to low priority',
-  'Hobbies that are already completed for the day no longer send a reminder',
-];
 
 // Parse a stored "HH:mm" string into a Date for the time picker.
 const timeFromHHMM = (hhmm) => {
@@ -135,11 +128,25 @@ export default function SettingsScreen() {
   const { state, updateSettings, restoreData } = useApp();
   const toast = useToast();
   const navigation = useNavigation();
+  const route = useRoute();
   const settings = state.settings;
 
   const [busy, setBusy] = useState(false);
   // Parsed + validated backup awaiting the destructive-restore confirm.
   const [pendingImport, setPendingImport] = useState(null);
+
+  // Auto-scroll to the What's-New card when the Dashboard's "See now"
+  // deep-links here with { highlightWhatsNew: true }. The section reports
+  // its content offset via onLayout; once known, scroll to it (slightly
+  // above, so the section title stays visible) and consume the param.
+  const scrollRef = useRef(null);
+  const [whatsNewY, setWhatsNewY] = useState(null);
+  useEffect(() => {
+    if (route.params?.highlightWhatsNew && whatsNewY != null) {
+      scrollRef.current?.scrollTo({ y: Math.max(0, whatsNewY - 70), animated: true });
+      navigation.setParams({ highlightWhatsNew: undefined });
+    }
+  }, [route.params?.highlightWhatsNew, whatsNewY, navigation]);
 
   // Export: write a versioned JSON envelope. On Android the user picks a
   // folder (their Downloads) ONCE — the SAF directory URI is remembered,
@@ -273,7 +280,11 @@ export default function SettingsScreen() {
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: COLORS.bg }]}>
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        ref={scrollRef}
+        style={styles.container}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.header}>
           <TouchableOpacity
             onPress={() => navigation.goBack()}
@@ -446,17 +457,21 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* What's new — features shipped in this release batch. */}
-        <Text style={[styles.section, { color: COLORS.textMuted, marginTop: SPACING.xl }]}>
-          WHAT'S NEW
-        </Text>
-        <View style={[styles.card, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border, padding: SPACING.md }]}>
-          {WHATS_NEW.map((item) => (
-            <View key={item} style={styles.newRow}>
-              <View style={[styles.newDot, { backgroundColor: COLORS.accent }]} />
-              <Text style={[styles.newText, { color: COLORS.textSub }]}>{item}</Text>
-            </View>
-          ))}
+        {/* What's new — features shipped in this release batch. Wrapped so
+            onLayout can report its content offset for the dashboard
+            "See now" auto-scroll. */}
+        <View onLayout={(e) => setWhatsNewY(e.nativeEvent.layout.y)}>
+          <Text style={[styles.section, { color: COLORS.textMuted, marginTop: SPACING.xl }]}>
+            WHAT'S NEW
+          </Text>
+          <View style={[styles.card, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border, padding: SPACING.md }]}>
+            {WHATS_NEW.map((item) => (
+              <View key={item} style={styles.newRow}>
+                <View style={[styles.newDot, { backgroundColor: COLORS.accent }]} />
+                <Text style={[styles.newText, { color: COLORS.textSub }]}>{item}</Text>
+              </View>
+            ))}
+          </View>
         </View>
 
         <View style={{ height: 40 }} />
