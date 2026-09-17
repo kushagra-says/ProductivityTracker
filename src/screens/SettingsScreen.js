@@ -21,7 +21,7 @@ import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
-import { useTheme, ACCENTS, ACCENTS_CREAM, FONTS, RADIUS, SHADOW, SPACING } from '../utils/theme';
+import { useTheme, ACCENTS, ACCENTS_CREAM, ACCENT_LABELS, FONTS, RADIUS, SHADOW, SPACING } from '../utils/theme';
 import { ACCENT_STORAGE_KEY } from '../utils/theme';
 import InlineTimePicker from '../components/InlineTimePicker';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -115,6 +115,7 @@ function NotificationRow({
                 value={timeFromHHMM(timeValue)}
                 onChange={(d) => onTimeChange(hhmmFromDate(d))}
                 accent={COLORS.accent}
+                onAccent={COLORS.onAccent}
                 surface={COLORS.surface}
                 surfaceAlt={COLORS.surfaceAlt}
                 border={COLORS.border}
@@ -326,8 +327,8 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Accent picker — both themes show the same ten accents (brown is
-            available in dark too, in its own lighter dark-tuned shade). */}
+        {/* Accent picker — dark shows white in brown's old slot (white is
+            the black & white mode); cream keeps brown and has no white. */}
         <Text style={[styles.section, { color: COLORS.textMuted, marginTop: SPACING.xl }]}>
           ACCENT COLOR
         </Text>
@@ -351,10 +352,20 @@ export default function SettingsScreen() {
                 ]}
               >
                 <View style={[styles.accentSwatch, { backgroundColor: c.accent }]}>
-                  {isActive && <Ionicons name="checkmark" size={20} color="#fff" />}
+                  {isActive && (
+                    /* White's swatch is white — the checkmark flips to dark
+                        there, or it would be invisible. */
+                    <Ionicons
+                      name="checkmark"
+                      size={20}
+                      color={c.accent.toLowerCase() === '#ffffff' ? '#0D0D0F' : '#fff'}
+                    />
+                  )}
                 </View>
                 <Text style={[styles.accentName, { color: COLORS.text }]}>
-                  {key.charAt(0).toUpperCase() + key.slice(1)}
+                  {/* Display name only — the storage key stays 'white' so
+                      saved preferences keep working ('Paper' is the label). */}
+                  {ACCENT_LABELS[key] || key.charAt(0).toUpperCase() + key.slice(1)}
                 </Text>
               </TouchableOpacity>
             );

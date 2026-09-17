@@ -31,6 +31,8 @@ const CELL_GAP = 3;
 const SECTION_GAP = 12;
 
 function WeekChart({ hobby, COLORS, today }) {
+  // mono(): stored colors render grayscale under the white accent (dark).
+  const { mono } = useTheme();
   const days = lastNDays(7);
   const max = 1; // 0 or 1 — simple bar chart.
 
@@ -50,8 +52,8 @@ function WeekChart({ hobby, COLORS, today }) {
                   styles.chartBar,
                   {
                     height,
-                    backgroundColor: isDone ? hobby.color : COLORS.border,
-                    borderColor: isToday ? hobby.color : 'transparent',
+                    backgroundColor: isDone ? mono(hobby.color) : COLORS.border,
+                    borderColor: isToday ? mono(hobby.color) : 'transparent',
                     borderWidth: isToday ? 2 : 0,
                   },
                 ]}
@@ -93,6 +95,7 @@ function WeekChart({ hobby, COLORS, today }) {
 //     (no ghost, no border).
 //   - The day-of-week gutter maps rowIdx 0..6 to Mon..Sun.
 function YearGrid({ hobby, COLORS, today }) {
+  const { mono } = useTheme();
   // `today` is the YYYY-MM-DD string from state.today. We also keep
   // a Date mirror so `isFutureCell` / `buildMonthSections` can do
   // local-day comparisons.
@@ -186,9 +189,9 @@ function YearGrid({ hobby, COLORS, today }) {
                             width: CELL,
                             height: CELL,
                             backgroundColor: isDone
-                              ? hobby.color
+                              ? mono(hobby.color)
                               : COLORS.border,
-                            borderColor: isToday ? hobby.color : 'transparent',
+                            borderColor: isToday ? mono(hobby.color) : 'transparent',
                             borderWidth: isToday ? 2 : 0,
                           },
                         ]}
@@ -208,7 +211,7 @@ function YearGrid({ hobby, COLORS, today }) {
 export default function HobbyDetailScreen() {
   const navigation = useNavigation();
   const route = useRoute();
-  const { COLORS } = useTheme();
+  const { COLORS, mono } = useTheme();
   const { state, toggleHobbyToday, deleteHobby } = useApp();
   const toast = useToast();
 
@@ -271,11 +274,11 @@ export default function HobbyDetailScreen() {
         <View
           style={[
             styles.hero,
-            { backgroundColor: COLORS.surfaceAlt, borderColor: hobby.color + '66' },
+            { backgroundColor: COLORS.surfaceAlt, borderColor: mono(hobby.color) + '66' },
           ]}
         >
-          <View style={[styles.heroIcon, { backgroundColor: hobby.color + '22' }]}>
-            <Ionicons name={hobby.icon} size={36} color={hobby.color} />
+          <View style={[styles.heroIcon, { backgroundColor: mono(hobby.color) + '22' }]}>
+            <Ionicons name={hobby.icon} size={36} color={mono(hobby.color)} />
           </View>
           <Text style={[styles.heroName, { color: COLORS.text }]}>{hobby.name}</Text>
           <Text style={[styles.heroSub, { color: COLORS.textMuted }]}>Since {memberSince}</Text>
@@ -285,15 +288,15 @@ export default function HobbyDetailScreen() {
             style={[
               styles.bigCheck,
               {
-                borderColor: hobby.color,
-                backgroundColor: done ? hobby.color : 'transparent',
+                borderColor: mono(hobby.color),
+                backgroundColor: done ? mono(hobby.color) : 'transparent',
               },
             ]}
           >
             {done ? (
               <Ionicons name="checkmark" size={28} color="#fff" />
             ) : (
-              <Text style={[styles.bigCheckLabel, { color: hobby.color }]}>Mark today</Text>
+              <Text style={[styles.bigCheckLabel, { color: mono(hobby.color) }]}>Mark today</Text>
             )}
           </TouchableOpacity>
         </View>

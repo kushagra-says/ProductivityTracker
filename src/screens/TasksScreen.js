@@ -36,7 +36,7 @@ function maxDate(...values) {
 
 export default function TasksScreen() {
   const { state, completeTask, revertTask, deleteTask } = useApp();
-  const { COLORS } = useTheme();
+  const { COLORS, mono } = useTheme();
   const navigation = useNavigation();
   const toast = useToast();
   const { refreshing, onRefresh } = usePullRefresh();
@@ -159,9 +159,9 @@ export default function TasksScreen() {
 
           <View style={styles.cardMeta}>
             {cat && (
-              <View style={[styles.catChip, { backgroundColor: cat.color + '22' }]}>
-                <Ionicons name={catIcon} size={11} color={cat.color} />
-                <Text style={[styles.catChipText, { color: cat.color }]}>{cat.name}</Text>
+              <View style={[styles.catChip, { backgroundColor: mono(cat.color) + '22' }]}>
+                <Ionicons name={catIcon} size={11} color={mono(cat.color)} />
+                <Text style={[styles.catChipText, { color: mono(cat.color) }]}>{cat.name}</Text>
               </View>
             )}
             <View style={[styles.catChip, { backgroundColor: pc.color + '22' }]}>
@@ -225,8 +225,8 @@ export default function TasksScreen() {
           style={[styles.addBtn, { backgroundColor: COLORS.accent }]}
           onPress={() => navigation.navigate('AddTask')}
         >
-          <Ionicons name="add" size={20} color="#fff" />
-          <Text style={styles.addBtnText}>New</Text>
+          <Ionicons name="add" size={20} color={COLORS.onAccent} />
+          <Text style={[styles.addBtnText, { color: COLORS.onAccent }]}>New</Text>
         </TouchableOpacity>
       </View>
 
@@ -319,8 +319,8 @@ export default function TasksScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={COLORS.accent}
-            colors={[COLORS.accent]}
+            tintColor={COLORS.onAccent}
+            colors={[COLORS.onAccent]}
           />
         }
         ListEmptyComponent={
@@ -358,7 +358,7 @@ const styles = StyleSheet.create({
   },
   title:     { ...FONTS.heading, fontSize: 28 },
   addBtn:    { flexDirection: 'row', alignItems: 'center', borderRadius: RADIUS.md, paddingHorizontal: 14, paddingVertical: 8, gap: 4, ...SHADOW.accent },
-  addBtnText:{ color: '#fff', fontWeight: '700', fontSize: 14 },
+  addBtnText:{ fontWeight: '700', fontSize: 14 },
 
   searchRow: {
     flexDirection: 'row',

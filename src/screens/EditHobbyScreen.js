@@ -187,20 +187,23 @@ export default function EditHobbyScreen() {
 
         <Text style={[styles.fieldLabel, { color: COLORS.textMuted }]}>COLOR</Text>
         <View style={styles.colorRow}>
+          {/* flex:1 cells put every color on one straight row that
+              spans the screen; the scaled selected dot stays in its slot. */}
           {COLOR_OPTIONS.map((c) => (
-            <TouchableOpacity
-              key={c}
-              style={[
-                styles.colorDot,
-                { backgroundColor: c },
-                color === c && styles.colorDotSelected,
-              ]}
-              onPress={() => setColor(c)}
-            >
-              {color === c && (
-                <Ionicons name="checkmark" size={12} color="#fff" />
-              )}
-            </TouchableOpacity>
+            <View key={c} style={styles.colorCell}>
+              <TouchableOpacity
+                style={[
+                  styles.colorDot,
+                  { backgroundColor: c },
+                  color === c && styles.colorDotSelected,
+                ]}
+                onPress={() => setColor(c)}
+              >
+                {color === c && (
+                  <Ionicons name="checkmark" size={12} color="#fff" />
+                )}
+              </TouchableOpacity>
+            </View>
           ))}
         </View>
 
@@ -236,6 +239,7 @@ export default function EditHobbyScreen() {
                 value={reminderTime}
                 onChange={setReminderTime}
                 accent={COLORS.accent}
+                onAccent={COLORS.onAccent}
                 surface={COLORS.surface}
                 surfaceAlt={COLORS.surfaceAlt}
                 border={COLORS.border}
@@ -322,8 +326,12 @@ const styles = StyleSheet.create({
   iconGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm, marginBottom: SPACING.lg },
   iconBtn:  { width: 44, height: 44, borderRadius: RADIUS.sm, justifyContent: 'center', alignItems: 'center', borderWidth: 1 },
 
-  colorRow:        { flexDirection: 'row', gap: SPACING.sm, marginBottom: SPACING.lg, flexWrap: 'wrap' },
-  colorDot:        { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'transparent' },
+  colorRow:        { flexDirection: 'row', gap: 6, marginBottom: SPACING.lg },
+  colorCell:       { flex: 1, height: 44, alignItems: 'center', justifyContent: 'center' },
+  // Dot sized as a % of its flex cell (aspect-ratio circle) so the selected
+  // state's scale(1.15) can never exceed the cell bounds — Android clips
+  // overflowing content, which flattened the ring on narrow cells.
+  colorDot:        { width: '82%', aspectRatio: 1, borderRadius: 999, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'transparent' },
   colorDotSelected:{ borderColor: '#fff', transform: [{ scale: 1.15 }] },
 
   // Reminder card

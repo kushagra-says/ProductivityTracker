@@ -15,4 +15,7 @@ export const WHATS_NEW = [
   'More accent colors to choose from — ten accents in both themes',
   'Morning briefing now lists the day’s top 5 oldest pending tasks, high to low priority',
   'Hobbies that are already completed for the day no longer send a reminder',
+  'Create multiple custom reminders per task, each with its own title and description',
+  'Insights hobbies section: distinct days completed, best streak ever, current best streak and the lowest performer',
+  'New Paper accent for dark mode (replaces Brown) — picking it turns the entire app black & white',
 ];

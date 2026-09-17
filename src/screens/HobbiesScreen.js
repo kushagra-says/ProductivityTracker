@@ -65,14 +65,16 @@ function HobbiesHeader({ onAdd, COLORS }) {
         style={[styles.addBtn, { backgroundColor: COLORS.accent }]}
         onPress={onAdd}
       >
-        <Ionicons name="add" size={20} color="#fff" />
-        <Text style={styles.addBtnText}>New</Text>
+        <Ionicons name="add" size={20} color={COLORS.onAccent} />
+        <Text style={[styles.addBtnText, { color: COLORS.onAccent }]}>New</Text>
       </TouchableOpacity>
     </View>
   );
 }
 
 function HobbyListItem({ hobby, onToggle, onPress, COLORS, today }) {
+  // mono(): stored colors render grayscale under the white accent (dark).
+  const { mono } = useTheme();
   const done = !!(hobby.completions && hobby.completions[today]);
   const streak = currentStreak(hobby.completions);
   const days = lastNDays(7);
@@ -86,13 +88,13 @@ function HobbyListItem({ hobby, onToggle, onPress, COLORS, today }) {
         styles.hobbyCard,
         {
           backgroundColor: COLORS.surfaceAlt,
-          borderColor: done ? hobby.color + '66' : COLORS.border,
+          borderColor: done ? mono(hobby.color) + '66' : COLORS.border,
         },
       ]}
     >
       <View style={styles.hobbyTopRow}>
-        <View style={[styles.hobbyIconWrap, { backgroundColor: hobby.color + '22' }]}>
-          <Ionicons name={hobby.icon} size={22} color={hobby.color} />
+        <View style={[styles.hobbyIconWrap, { backgroundColor: mono(hobby.color) + '22' }]}>
+          <Ionicons name={hobby.icon} size={22} color={mono(hobby.color)} />
         </View>
 
         <View style={{ flex: 1 }}>
@@ -123,8 +125,8 @@ function HobbyListItem({ hobby, onToggle, onPress, COLORS, today }) {
           style={[
             styles.tickBtn,
             {
-              borderColor: hobby.color,
-              backgroundColor: done ? hobby.color : 'transparent',
+              borderColor: mono(hobby.color),
+              backgroundColor: done ? mono(hobby.color) : 'transparent',
             },
           ]}
         >
@@ -147,8 +149,8 @@ function HobbyListItem({ hobby, onToggle, onPress, COLORS, today }) {
                 style={[
                   styles.dayBox,
                   {
-                    backgroundColor: isDone ? hobby.color : COLORS.border,
-                    borderColor: isToday ? hobby.color : 'transparent',
+                    backgroundColor: isDone ? mono(hobby.color) : COLORS.border,
+                    borderColor: isToday ? mono(hobby.color) : 'transparent',
                     borderWidth: isToday ? 2 : 0,
                   },
                 ]}
@@ -240,8 +242,8 @@ export default function HobbiesScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={COLORS.accent}
-            colors={[COLORS.accent]}
+            tintColor={COLORS.onAccent}
+            colors={[COLORS.onAccent]}
           />
         }
         ListHeaderComponent={<HobbiesHeader onAdd={() => setModalVisible(true)} COLORS={COLORS} />}
@@ -255,8 +257,8 @@ export default function HobbiesScreen() {
               style={[styles.emptyBtn, { backgroundColor: COLORS.accent }]}
               onPress={() => setModalVisible(true)}
             >
-              <Ionicons name="add" size={16} color="#fff" />
-              <Text style={styles.emptyBtnText}>Add hobby</Text>
+              <Ionicons name="add" size={16} color={COLORS.onAccent} />
+              <Text style={[styles.emptyBtnText, { color: COLORS.onAccent }]}>Add hobby</Text>
             </TouchableOpacity>
           </View>
         }
@@ -315,20 +317,23 @@ export default function HobbiesScreen() {
 
             <Text style={[styles.fieldLabel, { color: COLORS.textMuted }]}>COLOR</Text>
             <View style={styles.colorRow}>
+              {/* flex:1 cells put every color on one straight row that
+                  spans the modal; the scaled selected dot stays in its slot. */}
               {COLORS[COLOR_OPTIONS_KEY].map((color) => (
-                <TouchableOpacity
-                  key={color}
-                  style={[
-                    styles.colorDot,
-                    { backgroundColor: color },
-                    selectedColor === color && styles.colorDotSelected,
-                  ]}
-                  onPress={() => setSelectedColor(color)}
-                >
-                  {selectedColor === color && (
-                    <Ionicons name="checkmark" size={12} color="#fff" />
-                  )}
-                </TouchableOpacity>
+                <View key={color} style={styles.colorCell}>
+                  <TouchableOpacity
+                    style={[
+                      styles.colorDot,
+                      { backgroundColor: color },
+                      selectedColor === color && styles.colorDotSelected,
+                    ]}
+                    onPress={() => setSelectedColor(color)}
+                  >
+                    {selectedColor === color && (
+                      <Ionicons name="checkmark" size={12} color="#fff" />
+                    )}
+                  </TouchableOpacity>
+                </View>
               ))}
             </View>
 
@@ -371,6 +376,7 @@ export default function HobbiesScreen() {
                     value={reminderTime}
                     onChange={setReminderTime}
                     accent={COLORS.accent}
+                    onAccent={COLORS.onAccent}
                     surface={COLORS.surface}
                     surfaceAlt={COLORS.surfaceAlt}
                     border={COLORS.border}
@@ -442,7 +448,7 @@ const styles = StyleSheet.create({
   },
   title:     { ...FONTS.heading, fontSize: 28 },
   addBtn:    { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: RADIUS.md, paddingHorizontal: 14, paddingVertical: 8, ...SHADOW.accent },
-  addBtnText:{ color: '#fff', fontWeight: '700', fontSize: 14 },
+  addBtnText:{ fontWeight: '700', fontSize: 14 },
 
   hobbyCard: {
     borderRadius: RADIUS.lg,
@@ -469,7 +475,7 @@ const styles = StyleSheet.create({
   empty:      { alignItems: 'center', paddingTop: 60, gap: SPACING.sm },
   emptyText:  { fontSize: 16, marginTop: 4 },
   emptyBtn:   { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: SPACING.lg, paddingVertical: 10, borderRadius: RADIUS.md, marginTop: SPACING.sm, ...SHADOW.accent },
-  emptyBtnText:{ color: '#fff', fontWeight: '700', fontSize: 14 },
+  emptyBtnText:{ fontWeight: '700', fontSize: 14 },
 
   modalOverlay: { flex: 1, backgroundColor: '#000000AA', justifyContent: 'flex-end' },
   modal:        { borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: SPACING.xl, borderWidth: 1, borderBottomWidth: 0, height: '92%' },
@@ -484,8 +490,12 @@ const styles = StyleSheet.create({
   iconGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm, marginBottom: SPACING.lg },
   iconBtn:  { width: 44, height: 44, borderRadius: RADIUS.sm, justifyContent: 'center', alignItems: 'center', borderWidth: 1 },
 
-  colorRow:        { flexDirection: 'row', gap: SPACING.sm, marginBottom: SPACING.lg, flexWrap: 'wrap' },
-  colorDot:        { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'transparent' },
+  colorRow:        { flexDirection: 'row', gap: 6, marginBottom: SPACING.lg },
+  colorCell:       { flex: 1, height: 44, alignItems: 'center', justifyContent: 'center' },
+  // Dot sized as a % of its flex cell (aspect-ratio circle) so the selected
+  // state's scale(1.15) can never exceed the cell bounds — Android clips
+  // overflowing content, which flattened the ring on narrow cells.
+  colorDot:        { width: '82%', aspectRatio: 1, borderRadius: 999, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'transparent' },
   colorDotSelected:{ borderColor: '#fff', transform: [{ scale: 1.15 }] },
 
   preview:     { flexDirection: 'row', alignItems: 'center', borderRadius: RADIUS.md, padding: SPACING.md, borderWidth: 1, gap: SPACING.md, marginBottom: SPACING.lg },

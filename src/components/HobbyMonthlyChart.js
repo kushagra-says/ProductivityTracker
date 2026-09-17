@@ -9,7 +9,7 @@ import LineChart from './LineChart';
  * Width is fluid: the chart fits its parent card regardless of month length.
  */
 export default function HobbyMonthlyChart({ hobby }) {
-  const { COLORS } = useTheme();
+  const { COLORS, mono } = useTheme();
   const [selectedMonth, setSelectedMonth] = useState(new Date());
 
   const isCurrentMonth = format(selectedMonth, 'yyyy-MM') === format(new Date(), 'yyyy-MM');
@@ -31,7 +31,7 @@ export default function HobbyMonthlyChart({ hobby }) {
   // Data points use 1-based day numbers; the chart maps day → pixel via xToPx.
   const series = [
     {
-      color: hobby.color,
+      color: mono(hobby.color),
       name: hobby.name,
       hidden: false,
       data: data.filter((d) => d.done).map((d) => ({ x: d.day, y: 1 })),
@@ -92,7 +92,7 @@ export default function HobbyMonthlyChart({ hobby }) {
       </View>
 
       <View style={styles.legend}>
-        <View style={[styles.dot, { backgroundColor: hobby.color }]} />
+        <View style={[styles.dot, { backgroundColor: mono(hobby.color) }]} />
         <Text style={[styles.legendText, { color: COLORS.text }]} numberOfLines={1}>
           {hobby.name}
         </Text>

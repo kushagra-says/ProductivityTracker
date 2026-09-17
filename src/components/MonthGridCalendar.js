@@ -32,6 +32,9 @@ export default function MonthGridCalendar({
   border,
   text,
   textMuted,
+  // Content color on a selected day — dark in the monochrome (Paper) mode
+  // where the accent bg is white. Defaults to white.
+  onAccent = '#fff',
 }) {
   const today = useMemo(() => new Date(), []);
   const safeMin = minDate || today;
@@ -135,7 +138,7 @@ export default function MonthGridCalendar({
                 <Text
                   style={[
                     styles.dayText,
-                    { color: isSelected ? '#fff' : text },
+                    { color: isSelected ? onAccent : text },
                     disabled && !isSelected && { color: textMuted },
                   ]}
                 >

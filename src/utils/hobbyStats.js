@@ -1,10 +1,11 @@
 import { subDays, format } from 'date-fns';
 
 // a function to compute current streak from a completion map
-export function currentStreak(completions) {
+// `now` is injectable so callers (and tests) can pin the reference day.
+export function currentStreak(completions, now = new Date()) {
   if (!completions) return 0;
   let streak = 0;
-  let cursor = new Date();
+  let cursor = now;
   // Allow today not yet checked — count from yesterday.
   const todayKey = format(cursor, 'yyyy-MM-dd');
   if (!completions[todayKey]) {
@@ -45,6 +46,54 @@ export function longestStreak(completions) {
     prev.setTime(d.getTime());
   }
   return longest;
+}
+
+// Completion-day count for a single hobby (null-safe). Toggling a day
+// off deletes the key, so the key count IS the day count.
+export function hobbyTotalDays(hobby) {
+  if (!hobby || !hobby.completions) return 0;
+  return Object.keys(hobby.completions).length;
+}
+
+// Distinct days on which ANY hobby was completed — the union of all
+// completion maps' keys. Four hobbies done the same day count once.
+export function distinctCompletionDays(hobbies) {
+  if (!Array.isArray(hobbies)) return 0;
+  const days = new Set();
+  for (const h of hobbies) {
+    if (!h || !h.completions) continue;
+    for (const k of Object.keys(h.completions)) days.add(k);
+  }
+  return days.size;
+}
+
+// Best streak ever reached across all hobbies.
+export function maxLongestStreak(hobbies) {
+  if (!Array.isArray(hobbies)) return 0;
+  return hobbies.reduce(
+    (acc, h) => Math.max(acc, longestStreak(h && h.completions)),
+    0,
+  );
+}
+
+// Best currently-running streak across all hobbies.
+export function maxCurrentStreak(hobbies, now = new Date()) {
+  if (!Array.isArray(hobbies)) return 0;
+  return hobbies.reduce(
+    (acc, h) => Math.max(acc, currentStreak(h && h.completions, now)),
+    0,
+  );
+}
+
+// The hobby with the fewest completion days; ties keep list order.
+export function lowestHobby(hobbies) {
+  if (!Array.isArray(hobbies)) return null;
+  let lowest = null;
+  for (const h of hobbies) {
+    if (!h) continue;
+    if (!lowest || hobbyTotalDays(h) < hobbyTotalDays(lowest)) lowest = h;
+  }
+  return lowest;
 }
 
 // Last 7 days — Mon..Sun, days[6] is today.

@@ -35,6 +35,11 @@ const darkPalette = {
   shadow: '#000000',
   scrim: '#000000AA',
 
+  // Content painted ON accent-colored surfaces (buttons, pills). White for
+  // every colored accent; the provider flips it to near-black in the
+  // monochrome (white accent) mode, where the accent bg is white itself.
+  onAccent: '#FFFFFF',
+
   // Categorical palette — used by hobbies + categories.
   cat: ['#7C6FFF', '#3DDC84', '#FFB547', '#FF5C5C', '#5BC4FF', '#FF82B4', '#A8E063', '#FF9A5C'],
 };
@@ -68,8 +73,25 @@ const creamPalette = {
   shadow: '#3A2A1A',
   scrim: '#3A2A1AAA',
 
+  // Same role as the dark token — content on accent surfaces.
+  onAccent: '#FFFFFF',
+
   cat: ['#9B7B5D', '#3D8E5C', '#D4860A', '#CC3333', '#2288BB', '#CC6699', '#6AAA20', '#D4733A'],
 };
+
+// ─── Monochrome (the white accent, dark theme only) ─────────────────────────
+// Picking white in dark mode drains ALL color from the app. Two layers:
+//   1. Token level — the whole COLORS palette renders grayscale, so
+//      everything driven by useTheme() goes gray.
+//   2. Data level — stored hobby/category colors bypass the theme, so
+//      screens wrap their DISPLAY uses with the mono() helper from
+//      useTheme(); it's an identity function outside the mode. Data itself
+//      is never rewritten, so switching back to a colored accent restores
+//      every stored color exactly.
+// The pure color math lives in ./colors.js (no React Native imports) so the
+// plain-Node test suite can exercise it; re-exported here for convenience.
+export { desaturateHex, monochromePalette } from './colors';
+import { desaturateHex, monochromePalette } from './colors';
 
 // ─── Shared non-color tokens (never change between themes) ──────────────────
 
@@ -117,12 +139,17 @@ export const ACCENTS = {
   fuchsia: { accent: '#D65DE8', accentLight: '#E9A0F2', accentDim: '#3F1447', outlineAccent: '#D65DE875' },
   mint:    { accent: '#34D399', accentLight: '#7BE8BC', accentDim: '#14432F', outlineAccent: '#34D39975' },
   brown:   { accent: '#B5824F', accentLight: '#D4A878', accentDim: '#3A2812', outlineAccent: '#B5824F75' },
+  // Dark-only special accent: picking white turns the WHOLE app black &
+  // white (every theme token renders grayscale; stored hobby/category
+  // colors render gray at display time via mono()). Never shown in cream.
+  white:   { accent: '#FFFFFF', accentLight: '#F2F2F2', accentDim: '#2A2A30', outlineAccent: '#FFFFFF75' },
 };
 
 // Cream-palette accent overrides — same role, tuned for warm backgrounds.
-// Both grids show the same ten accents; the dark 'brown' is tuned lighter
-// than the cream one (#B5824F vs #7A4E2D) because a shade that reads as
-// brown on warm beige disappears into the near-black dark background.
+// The dark 'brown' entry above stays tuned lighter than the cream one
+// (#B5824F vs #7A4E2D) for legacy/back-compat reads; the dark GRID no longer
+// offers brown (white took its slot), but persisted dark='brown' is
+// migrated to 'white' on load so nobody loses their choice.
 //
 // Note: the cream 'purple' MUST read as purple on a warm beige bg. The
 // previous #9B7B5D was brown, which made the picker lie about what the
@@ -141,13 +168,20 @@ export const ACCENTS_CREAM = {
   brown:   { accent: '#7A4E2D', accentLight: '#A37352', accentDim: '#EFE0D2', outlineAccent: '#7A4E2D55' },
 };
 
-// Visible accent keys per theme. Both grids now show the same ten accents
-// (brown is available in dark as well, tuned lighter than the cream shade).
-// The picker reads from this list at render time.
-export const ACCENT_KEYS_DARK = Object.keys(ACCENTS);
+// Visible accent keys per theme. Dark shows white in place of brown — the
+// dark grid is: purple teal rose amber blue coral lime fuchsia mint white.
+// The entry stays in ACCENTS (above) because the dark picker reads its
+// swatch from there. Cream keeps brown; it has no white.
+// The picker reads from these lists at render time.
+export const ACCENT_KEYS_DARK = Object.keys(ACCENTS).filter((k) => k !== 'brown');
 export const ACCENT_KEYS_CREAM = Object.keys(ACCENTS_CREAM);
 // Back-compat alias — code that doesn't care which theme can still use this.
 export const ACCENT_KEYS = ACCENT_KEYS_DARK;
+
+// Picker display names. 'white' is branded as "Paper" in the UI; every
+// other key just capitalizes. Storage keeps the 'white' key — only the
+// label changes.
+export const ACCENT_LABELS = { white: 'Paper' };
 
 // Per-theme accent storage. The accent choice is remembered independently
 // for each theme, so a user can pick "rose" in dark and "brown" in cream
@@ -188,8 +222,11 @@ export function ThemeProvider({ children }) {
           const parsed = JSON.parse(raw);
           if (parsed && typeof parsed === 'object') {
             const next = { ...DEFAULT_ACCENTS };
-            if (typeof parsed.dark === 'string' && ACCENT_KEYS_DARK.includes(parsed.dark)) {
-              next.dark = parsed.dark;
+            // Dark's brown slot became white — carry a stored brown choice
+            // over so the migration doesn't reset anyone to purple.
+            const darkKey = parsed.dark === 'brown' ? 'white' : parsed.dark;
+            if (typeof darkKey === 'string' && ACCENT_KEYS_DARK.includes(darkKey)) {
+              next.dark = darkKey;
             }
             if (typeof parsed.cream === 'string' && ACCENT_KEYS_CREAM.includes(parsed.cream)) {
               next.cream = parsed.cream;
@@ -200,8 +237,14 @@ export function ThemeProvider({ children }) {
         }
 
         const legacy = await AsyncStorage.getItem(LEGACY_ACCENT_STORAGE_KEY);
-        if (legacy && ACCENT_KEYS_DARK.includes(legacy)) {
-          setAccentByMode({ dark: legacy, cream: legacy });
+        if (legacy) {
+          const darkKey = legacy === 'brown' ? 'white' : legacy;
+          if (ACCENT_KEYS_DARK.includes(darkKey) || ACCENT_KEYS_CREAM.includes(legacy)) {
+            setAccentByMode({
+              dark: ACCENT_KEYS_DARK.includes(darkKey) ? darkKey : DEFAULT_ACCENTS.dark,
+              cream: ACCENT_KEYS_CREAM.includes(legacy) ? legacy : DEFAULT_ACCENTS.cream,
+            });
+          }
         }
         // Best-effort cleanup of the legacy key.
         AsyncStorage.removeItem(LEGACY_ACCENT_STORAGE_KEY).catch(() => {});
@@ -232,16 +275,19 @@ export function ThemeProvider({ children }) {
   );
 
   // Restore an accent-per-theme map from a backup import. Validates each
-  // side against its own theme's key set (both accept the same ten keys
-  // since brown became a dark accent too) and applies live — unlike
-  // setAccentChoice, which only writes the active theme.
+  // side against its own theme's key set (ten keys each: dark without
+  // brown, cream without white) and applies live — unlike setAccentChoice,
+  // which only writes the active theme.
   const applyAccentMap = useCallback((map) => {
     if (!map || typeof map !== 'object') return;
     let touched = false;
     setAccentByMode((prev) => {
       const next = { ...prev };
-      if (typeof map.dark === 'string' && ACCENT_KEYS_DARK.includes(map.dark)) {
-        next.dark = map.dark;
+      // Same brown → white migration as hydration: restoring a backup made
+      // while dark still offered brown keeps the user's intent.
+      const darkKey = map.dark === 'brown' ? 'white' : map.dark;
+      if (typeof darkKey === 'string' && ACCENT_KEYS_DARK.includes(darkKey)) {
+        next.dark = darkKey;
         touched = true;
       }
       if (typeof map.cream === 'string' && ACCENT_KEYS_CREAM.includes(map.cream)) {
@@ -259,16 +305,36 @@ export function ThemeProvider({ children }) {
   const accent = accentByMode[mode];
   const accentOverride =
     (mode === 'dark' ? ACCENTS : ACCENTS_CREAM)[accent] || ACCENTS.purple;
+  // The white accent is dark-only and is the one true black & white mode.
+  const monochrome = mode === 'dark' && accent === 'white';
   // Memoized: a new COLORS object every provider render would re-render
   // EVERY useTheme() consumer (i.e. every screen) even when the palette
   // did not change.
   const COLORS = useMemo(
-    () => ({ ...basePalette, ...accentOverride }),
-    [basePalette, accentOverride],
+    () => {
+      const merged = { ...basePalette, ...accentOverride };
+      if (!monochrome) return merged;
+      const gray = monochromePalette(merged);
+      // Content painted ON accent surfaces (button labels, add icons,
+      // AM/PM pills, refresh spinner) must flip to dark — the accent bg is
+      // white in this mode, so '#FFFFFF' content would be invisible.
+      gray.onAccent = '#0D0D0F';
+      return gray;
+    },
+    [basePalette, accentOverride, monochrome],
   );
 
-  // The visible accent keys for the picker. Both themes show the same
-  // ten accents now that dark exposes 'brown' as well.
+  // Grayscale wrapper for STORED data colors (hobby.color, category.color),
+  // which bypass the theme tokens: identity outside the white accent, gray
+  // inside it. Wrap DISPLAY uses only — never write its output back into
+  // state, or the real color would be lost when the accent changes.
+  const mono = useCallback(
+    (color) => (monochrome ? desaturateHex(color) : color),
+    [monochrome],
+  );
+
+  // The visible accent keys for the picker. Dark shows white in brown's
+  // old slot; cream keeps brown and has no white.
   const visibleAccentKeys = mode === 'dark' ? ACCENT_KEYS_DARK : ACCENT_KEYS_CREAM;
 
   const themeValue = useMemo(
@@ -276,12 +342,14 @@ export function ThemeProvider({ children }) {
       COLORS,
       mode,
       accent,
+      monochrome,
+      mono,
       visibleAccentKeys,
       toggleThemeMode,
       setAccentChoice,
       applyAccentMap,
     }),
-    [COLORS, mode, accent, visibleAccentKeys, toggleThemeMode, setAccentChoice, applyAccentMap],
+    [COLORS, mode, accent, monochrome, mono, visibleAccentKeys, toggleThemeMode, setAccentChoice, applyAccentMap],
   );
 
   return (
@@ -294,5 +362,5 @@ export function ThemeProvider({ children }) {
 export function useTheme() {
   const ctx = useContext(ThemeContext);
   if (!ctx) throw new Error('useTheme must be used inside <ThemeProvider>');
-  return ctx; // { COLORS, mode, accent, toggleThemeMode, setAccentChoice }
+  return ctx; // { COLORS, mode, accent, monochrome, mono, toggleThemeMode, setAccentChoice }
 }

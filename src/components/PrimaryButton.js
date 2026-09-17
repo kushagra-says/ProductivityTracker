@@ -51,8 +51,15 @@ export default function PrimaryButton({
         style,
       ]}
     >
-      {icon && <Ionicons name={icon} size={18} color="#fff" />}
-      <Text style={styles.label}>{label}</Text>
+      {/* onAccent keeps labels readable when the accent bg is white in the
+          monochrome (Paper) mode; ghost has no fill, so it stays text-tinted. */}
+      {icon && <Ionicons name={icon} size={18} color={COLORS.onAccent} />}
+      <Text style={[
+        styles.label,
+        { color: variant === 'ghost' ? COLORS.text : COLORS.onAccent },
+      ]}>
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -74,7 +81,6 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   label: {
-    color: '#fff',
     fontSize: 16,
     fontWeight: '800',
     letterSpacing: 0.3,

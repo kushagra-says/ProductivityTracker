@@ -101,7 +101,9 @@ export default function ConfirmDialog({
                 !destructive && SHADOW.accent,
               ]}
             >
-              <Text style={[styles.btnText, styles.btnTextPrimary]}>
+              {/* onAccent: the confirm bg is accent/danger — dark text in
+                  the monochrome (Paper) mode where both turn white-ish. */}
+              <Text style={[styles.btnText, { color: COLORS.onAccent }]}>
                 {confirmLabel}
               </Text>
             </TouchableOpacity>
@@ -171,7 +173,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.2,
   },
-  btnTextPrimary: { color: '#fff' },
   destructiveShadow: {
     shadowColor: '#FF5C5C',
     shadowOffset: { width: 0, height: 4 },

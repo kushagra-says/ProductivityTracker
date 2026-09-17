@@ -16,6 +16,7 @@ import Notifications, {
 import { defaultCategoryColors } from '../utils/theme';
 import { todayKey, hasActivityToday, computeNextStreak } from '../utils/streak';
 import { scheduleMidnightLoop } from '../utils/midnight';
+import { migrateTaskReminders, markDueReminders } from '../utils/taskReminders';
 
 // ─── Notification handler & channel ─────────────────────────────────────────
 // sounds + vibration. On Android we have to create a channel before the
@@ -117,14 +118,18 @@ function appReducer(state, action) {
         streak: cleanStreak,
         lastActiveDate: cleanAnchor,
         settings: { ...initialSettings, ...(loaded.settings || {}) },
-        // Backfill missing reminder fields on saved tasks (added in v1.3).
+        // Backfill missing reminder fields on saved tasks (added in v1.3),
+        // then migrate the reminders system (added in v1.4.6): a legacy
+        // single customReminderTime becomes the first entry of the new
+        // `reminders` list so nothing the user scheduled is lost. The
+        // migration is idempotent, so this is safe on every load and on
+        // every backup restore.
         tasks: (loaded.tasks || []).map((t) => ({
+          ...migrateTaskReminders(t),
           // Drop the old recurring fields silently if any task ever had them
           // — they're no longer scheduled anywhere.
           reminderTime: undefined,
           reminderDays: undefined,
-          ...t,
-          customReminderTime: t.customReminderTime ?? null,
           beforeExpiryMinutes: t.beforeExpiryMinutes ?? null,
         })),
       };
@@ -186,6 +191,31 @@ function appReducer(state, action) {
             : t,
         ),
       };
+
+    case 'MARK_REMINDERS_TRIGGERED': {
+      // payload: { updates: [{ taskId, reminderId, triggeredAt }] } — the
+      // due-sweep's stamps. Only touched tasks/entries get new object
+      // identities so unrelated tasks keep their references.
+      const byTask = new Map();
+      for (const u of action.payload.updates) {
+        if (!byTask.has(u.taskId)) byTask.set(u.taskId, []);
+        byTask.get(u.taskId).push(u);
+      }
+      return {
+        ...state,
+        tasks: state.tasks.map((t) => {
+          const ups = byTask.get(t.id);
+          if (!ups) return t;
+          const byId = new Map(ups.map((u) => [u.reminderId, u.triggeredAt]));
+          return {
+            ...t,
+            reminders: (t.reminders || []).map((r) =>
+              byId.has(r.id) ? { ...r, triggeredAt: byId.get(r.id) } : r,
+            ),
+          };
+        }),
+      };
+    }
 
     case 'ADD_CATEGORY':
       return { ...state, categories: [...state.categories, action.payload] };
@@ -398,6 +428,19 @@ export function AppProvider({ children }) {
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state)).catch(console.warn);
   }, [state]);
 
+  // ─── Custom reminder sweep ───────────────────────────────────────────────
+  // A reminder becomes "reminded" when its scheduled time PASSES — not
+  // when the notification is tapped (the user may never tap it, and a
+  // fired notification doesn't tell us the moment it actually rang).
+  // Sweeping stamps due entries so the UI renders them read-only and
+  // rescheduling skips them. When nothing is due, markDueReminders
+  // returns the same tasks reference and no dispatch happens.
+  const sweepDueReminders = useCallback(() => {
+    const { updates } = markDueReminders(tasksRef.current, new Date());
+    if (updates.length === 0) return;
+    dispatch({ type: 'MARK_REMINDERS_TRIGGERED', payload: { updates } });
+  }, []);
+
   // ─── Auto-expire pending tasks whose expiryDate has passed ────────────────
   useEffect(() => {
     const interval = setInterval(() => {
@@ -411,6 +454,8 @@ export function AppProvider({ children }) {
           dispatch({ type: 'UPDATE_TASK', payload: { ...task, status: 'expired' } });
         }
       });
+      // Same tick also stamps custom reminders whose time has passed.
+      sweepDueReminders();
     }, 60000);
     return () => clearInterval(interval);
   }, []);
@@ -452,13 +497,15 @@ export function AppProvider({ children }) {
           dispatch({ type: 'TICK_MIDNIGHT', payload: { today: newToday, midnightDate: now } });
         }
         recomputeStreak();
+        // Stamp reminders that came due while the app was backgrounded.
+        sweepDueReminders();
         // Slide the hobby reminder window forward (covers the case where
         // the app was closed long enough that every one-shot expired).
         refreshHobbyReminders();
       }
     });
     return () => sub?.remove?.();
-  }, [recomputeStreak, refreshHobbyReminders]);
+  }, [recomputeStreak, refreshHobbyReminders, sweepDueReminders]);
 
   // ─── Local-midnight rollover (Bug 4) ─────────────────────────────────────
   // When the user keeps the app open across midnight, the streak
@@ -473,13 +520,26 @@ export function AppProvider({ children }) {
       if (newToday === todayRef.current) return;
       dispatch({ type: 'TICK_MIDNIGHT', payload: { today: newToday, midnightDate } });
       recomputeStreak();
+      // Stamp any reminder that came due since the last sweep.
+      sweepDueReminders();
       // A new day un-completes every hobby — the reminder window must
       // re-roll so yesterday's completions no longer suppress today's
       // notifications.
       refreshHobbyReminders();
     });
     return () => handle.cancel();
-  }, [recomputeStreak, refreshHobbyReminders]);
+  }, [recomputeStreak, refreshHobbyReminders, sweepDueReminders]);
+
+  // First-sweep after hydration (and after every tasks change): tasks
+  // loaded from storage — or from a backup restore — may carry legacy
+  // customReminderTime values that migrated to reminders already past
+  // their time, and those must be stamped once so they render as
+  // "reminded" instead of being re-scheduled. Runs on every tasks change
+  // but is free when nothing is due (pure sweep, no dispatch).
+  useEffect(() => {
+    if (!initializedRef.current) return;
+    sweepDueReminders();
+  }, [state.tasks, sweepDueReminders]);
 
   // ─── Notification scheduling helpers (forward-declared for actions) ─────
   // (Re)schedules one hobby's reminder window: cancels every scheduled
@@ -668,7 +728,9 @@ export function AppProvider({ children }) {
   // user-picked reminders the task has on it.
   //
   // User reminders (either or both may be set):
-  //   - customReminderTime: ISO datetime string — one-shot at that moment.
+  //   - reminders: array of { id, title, description, at, triggeredAt } —
+  //     one-shot per entry at its `at` moment; entries already stamped
+  //     triggeredAt are skipped.
   //   - beforeExpiryMinutes: number (5/15/30/60/120/1440/custom) — fires
   //     that many minutes before expiryDate. When the user picks this,
   //     the implicit 1hr-before-expiry warning is suppressed.
@@ -723,12 +785,18 @@ export function AppProvider({ children }) {
         });
       }
 
-      // (b) User-picked custom one-shot at an exact datetime.
-      if (task.customReminderTime) {
-        await scheduleOne(new Date(task.customReminderTime), {
-          title: 'Task reminder',
-          body: `"${task.title}" — reminder`,
-          data: { kind: 'task-reminder', taskId: task.id },
+      // (b) User-picked custom reminders — one notification per entry.
+      // Normalize first: restoreData feeds raw payload tasks through here
+      // before LOAD_STATE's migration has necessarily run on them, and a
+      // legacy single customReminderTime must ride along as a reminder
+      // entry. Triggered entries no longer ring (and rescheduling after a
+      // revert can't resurrect them).
+      for (const r of migrateTaskReminders(task).reminders) {
+        if (r.triggeredAt) continue;
+        await scheduleOne(new Date(r.at), {
+          title: r.title || 'Task reminder',
+          body: r.description || `"${task.title}" — reminder`,
+          data: { kind: 'task-reminder', taskId: task.id, reminderId: r.id },
         });
       }
     } catch (e) {
@@ -749,6 +817,7 @@ export function AppProvider({ children }) {
       const full = {
         customReminderTime: null,
         beforeExpiryMinutes: null,
+        reminders: Array.isArray(task.reminders) ? task.reminders : [],
         ...task,
       };
       dispatch({ type: 'ADD_TASK', payload: full });

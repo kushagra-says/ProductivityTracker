@@ -186,6 +186,9 @@ TESTS
 [HOBBY-A02] PASS — toggle hobby for past date
 [HOBBY-A03] PASS — delete hobby cancels notifications
 [INS-01]    PASS — range filter changes charts
+
+[REM-*]     PASS — all 26 lines from run-reminder-tests.mjs (section U)
+[INSH-*]    PASS — all 21 lines from run-insights-tests.mjs (section V)
 ```
 
 A `PARTIAL` is only acceptable when a single sub-step of a multi-step test is blocked by an unrelated environment issue; the commit must include a written justification.
@@ -551,6 +554,10 @@ still governs them.
 - **Steps:** On New task, tap `Create task` with an empty title. Repeat on Add/Edit hobby with an empty name and no reminder days, and on Add/Edit category with an empty name.
 - **Expected:** Each shows a red error toast and stays on the screen; none of them crash. (Regression gate for the missing `toast.error` method.)
 
+### TOAST-02 — Toast renders above open popups **[MANUAL]**
+- **Steps:** Open the custom-reminder editor on New task and tap `Save` with the title empty (also try a past date). Repeat with the "Discard changes?" ConfirmDialog open.
+- **Expected:** The red error toast appears ON TOP of the popup (the toast is hosted in its own transparent modal, which stacks above any earlier-mounted popup) and never blocks touches — the popup below stays fully interactive.
+
 ### HOBBY-A01 — Create hobby with reminder
 - **Steps:** Add a hobby. Toggle on a daily reminder for `08:00`. Save.
 - **Expected:** Hobby appears on the list. `reminderTime === "08:00"`. 7 notifications scheduled (one per weekday).
@@ -773,6 +780,13 @@ Export writes a versioned JSON envelope (`format: productivity-tracker-backup`, 
 - **Steps:** Open the Tasks tab.
 - **Expected:** The card shows `Medium` rather than an empty pill or a crash.
 
+### PRIO-04 — Picker radio dot is hollow until selected **[MANUAL]**
+- **Steps:** Open Add Task (new) and Edit Task — inspect the PRIORITY chips.
+- **Expected:** Unselected chips show a hollow circle (`ellipse-outline`) in
+  the muted text color; the selected chip's dot is a filled circle
+  (`ellipse`) in the priority's color. Only one dot is filled at a time, and
+  tapping a chip moves the fill to it.
+
 ---
 
 ## Q. Accent options (Bug 13)
@@ -861,6 +875,151 @@ Export writes a versioned JSON envelope (`format: productivity-tracker-backup`, 
 
 ---
 
+## U. Multiple custom reminders per task
+
+Tasks carry `reminders: [{ id, title, description, at, triggeredAt }]`. The single
+custom one-shot reminder (`customReminderTime`) was removed and replaced by this
+list; `beforeExpiryMinutes` is unchanged. A reminder becomes triggered when its
+scheduled time passes (swept on the 60s tick, app foreground, midnight, and on
+first launch for migrated entries) — not on notification tap. Legacy persisted
+`customReminderTime` is converted into one entry (title "Reminder") by
+`migrateTaskReminders` during `LOAD_STATE`.
+
+### REM-01..11 — Pure-helper gates (run-reminder-tests.mjs)
+
+Automated, 30 PASS lines: backfill of `reminders: []`; legacy `customReminderTime`
+conversion (exact entry shape, idempotent re-run); `markDueReminders` stamps
+`triggeredAt` with the reminder's own `at` (the scheduled moment, also the
+displayed time), no double-stamp, identity-preserving no-op when nothing is due
+(including the `at === now` boundary); `markDueReminderList` — the same stamp
+semantics over one task's list (AddTaskScreen's open-editor tick), new-array-on-
+change / same-ref-on-noop, null → `[]`; `validateReminderDraft` all branches
+(title required, valid date, strictly future, `at <= expiry` allowed);
+`sortReminders` ordering + non-mutation.
+
+### REM-M1..M10 — Device checks **[MANUAL]**
+
+- **REM-M1 — Create.** Open Add Task → Custom reminders → Add reminder; enter
+  title + description, pick date/time. Save: the row shows the title and
+  `EEE, MMM d • h:mm a`; multiple reminders coexist, time-ordered.
+- **REM-M2 — Edit.** Pencil opens the editor prefilled; save updates the row.
+- **REM-M3 — Delete.** Trash removes the row; it disappears from the OS
+  scheduled-notifications list.
+- **REM-M4 — Triggered becomes read-only.** Set a reminder ~2 min ahead and let
+  the time pass (app foregrounded or backgrounded). The row renders exactly
+  `reminded <title> at <time> on <date>` with no edit/delete buttons —
+  including while the edit screen is open as the time passes (the screen
+  mirrors the context stamp and self-sweeps every 30s).
+- **REM-M4b — Triggered survives a save.** Let a reminder trigger, then edit
+  and save the task: the entry stays read-only (a save must never write
+  `triggeredAt: null` back over the stamp).
+- **REM-M5 — Notification content.** The fired notification shows the reminder
+  title (description as body when set); per-reminder `reminderId` in payload.
+- **REM-M6 — No re-arm after trigger.** Editing/saving the task after a reminder
+  fired does not reschedule the triggered entry.
+- **REM-M7 — Legacy conversion.** Launch once with a persisted
+  `customReminderTime`: it appears as a "Reminder" entry and the old field is
+  cleared; a second launch changes nothing.
+- **REM-M8 — Before-expiry untouched.** The before-expiry card and its
+  scheduling behave exactly as in section B.
+- **REM-M9 — Unsaved guard.** Add a reminder, press back → "Discard changes?"
+  dialog; Discard loses it, save keeps it.
+- **REM-M10 — Cleanup.** Completing or deleting the task leaves zero
+  `task-reminder` notifications scheduled.
+
+---
+
+## V. Insights — hobbies statistics
+
+The Hobbies card's "Days completed" counts DISTINCT days on which any hobby was
+completed (union of all `completions` date keys), no longer the cross-hobby sum.
+New stats: Best streak ever (`maxLongestStreak`), Current best streak
+(`maxCurrentStreak`), and a lowest-performer stat card (fewest days; ties keep
+list order) in the wrapping grid — value is the hobby's day count, label is
+`Lowest: <name>`; hidden when there are no hobbies.
+
+### INSH-01..13b — Pure-helper gates (run-insights-tests.mjs)
+
+Automated, 21 PASS lines: distinct-day union (4 hobbies same day → 1;
+overlapping union), null/empty safety; `maxLongestStreak` / `maxCurrentStreak`
+with fixed `now` (today-completion counts, lapsed hobby → 0);
+`lowestHobby` fewest/tie/null/single; `currentStreak`'s new optional `now`
+parameter keeps the omitted-argument behavior unchanged.
+
+### INSH-M1..M4 — Device checks **[MANUAL]**
+
+- **INSH-M1 — Distinct days.** Complete several hobbies on the same day: the
+  card shows 1 (previously the number of hobbies completed).
+- **INSH-M2 — Streak stats.** Best streak ever and current best streak match a
+  hand-counted completion history.
+- **INSH-M3 — Lowest performer card.** The grid's sixth card (danger tint,
+  trending-down icon) shows the day count of the hobby with the fewest days and
+  labels it `Lowest: <name>`; the grid is two full 3-card rows; hidden when
+  there are no hobbies.
+- **INSH-M4 — Grid layout.** 3 stat cards per row on both rows; long hobby
+  names wrap inside the `Lowest: …` label without clipping; nothing clipped on
+  a small device.
+
+---
+
+## W. Paper accent (white) — black & white mode (dark only)
+
+Dark's accent grid shows **Paper** (stored key stays `white`) in brown's old
+slot. Picking Paper drains ALL color from the app while it stays selected:
+every theme token renders grayscale (`monochromePalette` over the merged
+COLORS) and stored hobby/category colors render gray at display time via the
+`mono()` helper from `useTheme()`. Content painted ON accent surfaces — button
+labels, add icons, "See now", the active AM/PM pill, the selected calendar day
+and the pull-refresh spinner — uses the `onAccent` token, which flips to dark
+in this mode so it stays visible on the white accent bg. Data is never
+rewritten — toggling back to any colored accent (or to cream) restores every
+stored color exactly. The color pickers (`COLORS.cat`) and the accent picker
+stay deliberately colored: they are data entry, and a gray pick would save
+broken colors permanently. A persisted dark `brown` choice migrates to `white`
+on load and on backup restore. Exclusive to dark + white: cream has no white,
+and no other accent desaturates anything.
+
+### TH-01..07 — Pure color-math gates (run-theme-tests.mjs)
+
+Automated, 23 PASS lines: `desaturateHex` (Rec.601 luma, #RGB/#RRGGBB/#RRGGBBAA
+with alpha preserved verbatim, unparseable input passthrough, gray/white/black
+fixed points); `monochromePalette` (strings + arrays desaturate, non-values
+pass, input never mutated, `cat` kept saturated by reference); a full merged
+dark palette comes out fully gray except `cat`.
+
+### THM-01..M9 — Device checks **[MANUAL]**
+
+- **THM-M1 — Pick Paper.** Settings → Accent Color (dark): the grid shows
+  **Paper** (10 cards, no Brown). Pick it: every screen (Dashboard, Tasks,
+  Categories, Hobbies, Insights, Settings, pushed screens) renders black &
+  white only — status pills, priority dots, toasts, charts, buttons included.
+- **THM-M2 — Stored colors go gray, come back.** With colored hobbies/
+  categories set, switch to Paper: their chips, icons, check rings, grids and
+  charts all render gray. Switch back to Purple: every color is restored
+  byte-identical (no data was rewritten).
+- **THM-M3 — Cream unaffected.** Toggle to Cream: colors return; the cream
+  accent grid shows Brown and has no Paper.
+- **THM-M4 — Exclusive.** Every non-Paper dark accent renders the app fully
+  colored — only Paper desaturates.
+- **THM-M5 — Picker colors persist.** While Paper is active, the accent grid
+  and the hobby/category color pickers still show colored swatches; creating a
+  category or hobby while in Paper mode saves its REAL color (verify it comes
+  back colored after switching accents).
+- **THM-M6 — Paper swatch legibility.** With Paper active, the checkmark on
+  the Paper card's swatch is dark (visible against white).
+- **THM-M7 — Legacy migration.** With a stored dark accent of `brown` (from a
+  pre-1.4.8 install or backup), first launch shows the Paper card selected —
+  not reset to Purple; restoring such a backup does the same.
+- **THM-M8 — Whats-new + version.** Settings shows Version 1.4.8; the
+  dashboard What's-new card reappears with the Paper-accent entry.
+- **THM-M9 — On-accent content stays visible.** With Paper active: add-task /
+  add-hobby / add-category button text+icons, the dashboard "See now" text,
+  the ACTIVE AM/PM pill text (task, hobby, reminder editors and Settings), the
+  selected day in the month-grid calendar and the pull-to-refresh spinner are
+  all clearly visible; switching back to Purple restores white-on-purple.
+
+---
+
 ## Z. Pre-commit gate (run order)
 
 1. Run the automated suites in this order:
@@ -870,8 +1029,10 @@ Export writes a versioned JSON envelope (`format: productivity-tracker-backup`, 
    node tests/run-calendar-tests.mjs
    node tests/run-year-grid-tests.mjs
    node tests/run-midnight-tests.mjs
+   node tests/run-reminder-tests.mjs
+   node tests/run-insights-tests.mjs
    ```
 2. Run the manual checks marked **[MANUAL]**.
-3. Fill the `TESTS` block in the commit message verbatim using the reporting format. The total automated count must equal `18 + 52 + 35 + 106 + 22 = 233` PASS lines (no FAIL, no PARTIAL).
+3. Fill the `TESTS` block in the commit message verbatim using the reporting format. The total automated count must equal `18 + 52 + 35 + 106 + 22 + 30 + 21 + 23 = 307` PASS lines (no FAIL, no PARTIAL).
 4. The commit is rejected if any line reads `FAIL`. A `PARTIAL` is allowed only with a written justification.
 5. The commit is also rejected if the test count is < the lines listed in the example block — i.e. every test ID in the example must be present in the commit body, even if a single test is `PARTIAL`.

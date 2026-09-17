@@ -104,18 +104,21 @@ export default function EditCategoryScreen() {
 
         <Text style={[styles.label, { color: COLORS.textMuted, marginTop: SPACING.lg }]}>COLOR</Text>
         <View style={styles.colorRow}>
+          {/* flex:1 cells put every color on one straight row that
+              spans the screen; the scaled selected dot stays in its slot. */}
           {COLOR_OPTIONS.map(c => (
-            <TouchableOpacity
-              key={c}
-              style={[
-                styles.colorDot,
-                { backgroundColor: c },
-                color === c && styles.colorDotSelected,
-              ]}
-              onPress={() => setColor(c)}
-            >
-              {color === c && <Ionicons name="checkmark" size={12} color="#fff" />}
-            </TouchableOpacity>
+            <View key={c} style={styles.colorCell}>
+              <TouchableOpacity
+                style={[
+                  styles.colorDot,
+                  { backgroundColor: c },
+                  color === c && styles.colorDotSelected,
+                ]}
+                onPress={() => setColor(c)}
+              >
+                {color === c && <Ionicons name="checkmark" size={12} color="#fff" />}
+              </TouchableOpacity>
+            </View>
           ))}
         </View>
 
@@ -160,8 +163,12 @@ const styles = StyleSheet.create({
   iconGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   iconBtn:  { width: 44, height: 44, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
 
-  colorRow:        { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
-  colorDot:        { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
+  colorRow:        { flexDirection: 'row', gap: 6, marginBottom: SPACING.lg },
+  colorCell:       { flex: 1, height: 44, alignItems: 'center', justifyContent: 'center' },
+  // Dot sized as a % of its flex cell (aspect-ratio circle) so the selected
+  // state's scale(1.15) can never exceed the cell bounds — Android clips
+  // overflowing content, which flattened the ring on narrow cells.
+  colorDot:        { width: '82%', aspectRatio: 1, borderRadius: 999, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
   colorDotSelected:{ borderColor: '#fff', transform: [{ scale: 1.15 }] },
 
   saveBtn:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.lg, paddingVertical: 16, marginTop: SPACING.xl, gap: 8, ...SHADOW.accent },

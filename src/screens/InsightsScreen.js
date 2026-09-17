@@ -10,7 +10,10 @@ import {
   format, subDays, startOfDay, isWithinInterval, endOfDay,
 } from 'date-fns';
 import MonthlyCategoryLineChart from '../components/MonthlyCategoryLineChart';
-import { lastNDays, dayKey } from '../utils/hobbyStats';
+import {
+  lastNDays, dayKey, hobbyTotalDays, distinctCompletionDays,
+  maxLongestStreak, maxCurrentStreak, lowestHobby,
+} from '../utils/hobbyStats';
 import { useCountUp } from '../hooks/useCountUp';
 import { usePullRefresh } from '../hooks/usePullRefresh';
 
@@ -54,7 +57,7 @@ function rangeCutoff(range) {
 
 export default function InsightsScreen() {
   const { state } = useApp();
-  const { COLORS } = useTheme();
+  const { COLORS, mono } = useTheme();
   const [range, setRange] = useState('all');
   const { refreshing, onRefresh } = usePullRefresh();
 
@@ -93,16 +96,22 @@ export default function InsightsScreen() {
     const total = state.tasks.length;
     const rate = total > 0 ? Math.round((completed / total) * 100) : 0;
     const activeHobbies = state.hobbies.length;
-    const totalHobbyDays = state.hobbies.reduce(
-      (acc, h) => acc + (h.completions ? Object.keys(h.completions).length : 0),
-      0,
-    );
+    // Distinct days on which ANY hobby was completed — not the sum of
+    // per-hobby counts (four hobbies done the same day count once).
+    const totalHobbyDays = distinctCompletionDays(state.hobbies);
+    const bestStreakEver = maxLongestStreak(state.hobbies);
+    const currentBest = maxCurrentStreak(state.hobbies);
+    const lowest = lowestHobby(state.hobbies);
     return {
       completed,
       total,
       rate,
       activeHobbies,
       totalHobbyDays,
+      bestStreakEver,
+      currentBest,
+      lowest,
+      lowestDays: lowest ? hobbyTotalDays(lowest) : 0,
       bestStreak: state.streak,
     };
   }, [state.tasks, state.hobbies, state.streak]);
@@ -202,6 +211,9 @@ export default function InsightsScreen() {
   const animatedExpired    = useCountUp(stats.expired);
   const animatedHobbies    = useCountUp(allTime.activeHobbies);
   const animatedHobbyDays  = useCountUp(allTime.totalHobbyDays);
+  const animatedBestEver   = useCountUp(allTime.bestStreakEver);
+  const animatedCurrentBest = useCountUp(allTime.currentBest);
+  const animatedLowestDays = useCountUp(allTime.lowestDays);
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: COLORS.bg }]}>
@@ -212,8 +224,8 @@ export default function InsightsScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={COLORS.accent}
-            colors={[COLORS.accent]}
+            tintColor={COLORS.onAccent}
+            colors={[COLORS.onAccent]}
           />
         }
       >
@@ -290,15 +302,26 @@ export default function InsightsScreen() {
             <Ionicons name="leaf-outline" size={18} color={COLORS.success} />
             <Text style={[styles.chartTitle, { color: COLORS.text, marginLeft: 8, marginBottom: 0 }]}>Hobbies</Text>
           </View>
+          {/* Wrapping grid — 3 cards per row, two full rows. */}
           <View style={styles.hobbyStatsRow}>
             {[
-              { val: animatedHobbies,   label: 'Active hobbies', color: COLORS.accent,  icon: 'leaf' },
-              { val: animatedHobbyDays, label: 'Days completed', color: COLORS.success, icon: 'calendar' },
-              { val: state.streak,      label: 'Day streak',     color: COLORS.warning, icon: 'flame' },
+              { val: animatedHobbies,      label: 'Active hobbies',      color: COLORS.accent,  icon: 'leaf' },
+              { val: animatedHobbyDays,    label: 'Days completed',      color: COLORS.success, icon: 'calendar' },
+              { val: state.streak,         label: 'Day streak',          color: COLORS.warning, icon: 'flame' },
+              { val: animatedBestEver,     label: 'Best streak ever',    color: COLORS.warning, icon: 'trophy' },
+              { val: animatedCurrentBest,  label: 'Current best streak', color: COLORS.accent,  icon: 'trending-up' },
+              // Lowest performer as its own card: the value is its days
+              // completed, the label names the hobby itself.
+              ...(allTime.lowest ? [{
+                val: animatedLowestDays,
+                label: `Lowest: ${allTime.lowest.name}`,
+                color: COLORS.danger,
+                icon: 'trending-down',
+              }] : []),
             ].map((s) => (
               <View
                 key={s.label}
-                style={[styles.summaryCard, { backgroundColor: COLORS.surface, borderColor: s.color + '33' }]}
+                style={[styles.summaryCard, styles.hobbyStatCard, { backgroundColor: COLORS.surface, borderColor: s.color + '33' }]}
               >
                 <Ionicons name={s.icon} size={18} color={s.color} />
                 <Text style={[styles.summaryVal, { color: COLORS.text }]}>{s.val}</Text>
@@ -349,14 +372,14 @@ export default function InsightsScreen() {
               const iconName = isIoniconsName(cat.icon) ? cat.icon : FALLBACK_CATEGORY_ICON;
               return (
                 <View key={cat.id} style={styles.catRow}>
-                  <Ionicons name={iconName} size={22} color={cat.color} />
+                  <Ionicons name={iconName} size={22} color={mono(cat.color)} />
                   <View style={styles.catRowInfo}>
                     <View style={styles.catRowTop}>
-                      <Text style={[styles.catRowName, { color: cat.color }]}>{cat.name}</Text>
-                      <Text style={[styles.catRowPct, { color: cat.color }]}>{cat.pct}%</Text>
+                      <Text style={[styles.catRowName, { color: mono(cat.color) }]}>{cat.name}</Text>
+                      <Text style={[styles.catRowPct, { color: mono(cat.color) }]}>{cat.pct}%</Text>
                     </View>
                     <View style={[styles.catRowBar, { backgroundColor: COLORS.border }]}>
-                      <View style={[styles.catRowFill, { width: `${cat.pct}%`, backgroundColor: cat.color }]} />
+                      <View style={[styles.catRowFill, { width: `${cat.pct}%`, backgroundColor: mono(cat.color) }]} />
                     </View>
                     <View style={styles.catRowMeta}>
                       <Text style={[styles.catMetaText, { color: COLORS.textMuted }]}>
@@ -449,7 +472,11 @@ const styles = StyleSheet.create({
   cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: SPACING.md },
   empty:      { fontSize: 14, textAlign: 'center', paddingVertical: SPACING.lg },
 
-  hobbyStatsRow: { flexDirection: 'row', gap: SPACING.sm },
+  hobbyStatsRow:  { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm },
+  // Fixed-width cells for the hobby grid — flex:1 from summaryCard is
+  // overridden so 3 cards fit per row and row 2 stays left-aligned
+  // at the same size instead of stretching across the full width.
+  hobbyStatCard:  { flexBasis: '31%', flexGrow: 0, flexShrink: 0 },
 
   catRow:    { flexDirection: 'row', alignItems: 'flex-start', marginBottom: SPACING.md, gap: SPACING.sm },
   catRowInfo:{ flex: 1 },

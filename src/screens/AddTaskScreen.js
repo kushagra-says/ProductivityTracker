@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
-  ScrollView,
+  ScrollView, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,8 +15,14 @@ import MonthGridCalendar from '../components/MonthGridCalendar';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { useUnsavedGuard } from '../hooks/useUnsavedGuard';
 import { DurationWheelPicker, DurationWheelLabels } from '../components/WheelPicker';
-import { format, addMinutes, isPast } from 'date-fns';
+import { format, addMinutes } from 'date-fns';
 import { relTime } from '../utils/relTime';
+import {
+  markDueReminderList,
+  migrateTaskReminders,
+  sortReminders,
+  validateReminderDraft,
+} from '../utils/taskReminders';
 import {
   BEFORE_EXPIRY_PRESETS,
   activeChipLabel,
@@ -59,6 +65,7 @@ function TimeField({ label, value, onChange, COLORS }) {
         value={value}
         onChange={onChange}
         accent={COLORS.accent}
+        onAccent={COLORS.onAccent}
         surface={COLORS.surface}
         surfaceAlt={COLORS.surfaceAlt}
         border={COLORS.border}
@@ -70,10 +77,9 @@ function TimeField({ label, value, onChange, COLORS }) {
 }
 
 /**
- * Date+time card — used for the expiry card and the custom one-shot.
+ * Date+time card — used for the expiry card.
  * Renders the inline month-grid calendar on top, then the time wheels
- * below. Accepts an optional `maxDate` so the custom-reminder card can
- * cap itself at the expiry.
+ * below. Accepts an optional `maxDate` so callers can cap the picker.
  */
 function DateTimeCard({ label, icon, iconColor, value, onChange, onClear, COLORS, dismissTime = false, maxDate = null }) {
   const desc = describeDateTime(value);
@@ -124,6 +130,7 @@ function DateTimeCard({ label, icon, iconColor, value, onChange, onClear, COLORS
               minDate={new Date()}
               maxDate={maxDate}
               accent={COLORS.accent}
+              onAccent={COLORS.onAccent}
               surface={COLORS.surface}
               surfaceAlt={COLORS.surfaceAlt}
               border={COLORS.border}
@@ -144,7 +151,7 @@ function DateTimeCard({ label, icon, iconColor, value, onChange, onClear, COLORS
 
 export default function AddTaskScreen() {
   const { state, addTask, updateTask } = useApp();
-  const { COLORS } = useTheme();
+  const { COLORS, mono } = useTheme();
   const toast = useToast();
   const navigation = useNavigation();
   const route = useRoute();
@@ -153,9 +160,9 @@ export default function AddTaskScreen() {
   const isEditing = !!editingTask;
 
   const PRIORITY_LEVELS = [
-    { label: 'Low',    color: COLORS.success, icon: 'ellipse-outline' },
-    { label: 'Medium', color: COLORS.warning, icon: 'ellipse' },
-    { label: 'High',   color: COLORS.danger,  icon: 'ellipse' },
+    { label: 'Low',    color: COLORS.success },
+    { label: 'Medium', color: COLORS.warning },
+    { label: 'High',   color: COLORS.danger },
   ];
 
   const [title,      setTitle]      = useState(editingTask?.title || '');
@@ -164,17 +171,110 @@ export default function AddTaskScreen() {
   const [priority,   setPriority]   = useState(editingTask?.priority || 'Medium');
   const [expiryDate, setExpiryDate] = useState(editingTask?.expiryDate ? new Date(editingTask.expiryDate) : null);
 
-  // Custom one-shot reminder state. `customDate` is the full fire-at
-  // datetime. The user picks it via the inline month-grid calendar +
-  // time wheel. When an expiry is set, the calendar caps at the
-  // expiry date so the reminder can't fire after the task expires.
-  const [customOn,   setCustomOn]   = useState(!!editingTask?.customReminderTime);
-  const [customDate, setCustomDate] = useState(() => {
-    if (editingTask?.customReminderTime) return new Date(editingTask.customReminderTime);
+  // Custom reminders — MULTIPLE per task. Each entry carries its own
+  // title/description/fire-at time and is scheduled as its own one-shot
+  // notification. Entries whose time has already passed (triggeredAt
+  // stamped by the context sweep) render read-only and can no longer be
+  // edited. Normalizing through migrateTaskReminders covers the edge
+  // where a legacy task (single customReminderTime) reaches this screen
+  // without having gone through the context's LOAD_STATE migration.
+  const [reminders, setReminders] = useState(() =>
+    sortReminders(migrateTaskReminders(editingTask || {}).reminders),
+  );
+
+  // Reminder editor modal state. `editingReminder` is the entry being
+  // edited, or null when adding a fresh one. `rDate` is the full
+  // fire-at datetime picked via the inline month-grid calendar + time
+  // wheel; when an expiry is set the calendar caps at the expiry so a
+  // reminder can't fire after the task expires.
+  const [editorVisible, setEditorVisible] = useState(false);
+  const [editingReminder, setEditingReminder] = useState(null);
+  const [rTitle, setRTitle] = useState('');
+  const [rDesc, setRDesc] = useState('');
+  const [rDate, setRDate] = useState(() => {
     const d = new Date();
     d.setHours(d.getHours() + 1, 0, 0, 0);
     return d;
   });
+
+  const openReminderEditor = (reminder) => {
+    // Triggered reminders are historical — structurally uneditable. The
+    // pencil button is not rendered for them, this guards any other path.
+    if (reminder?.triggeredAt) return;
+    setEditingReminder(reminder || null);
+    setRTitle(reminder?.title || '');
+    setRDesc(reminder?.description || '');
+    if (reminder) {
+      setRDate(new Date(reminder.at));
+    } else {
+      // Seed to the top of the next hour — same default the old
+      // custom-reminder card used.
+      const d = new Date();
+      d.setHours(d.getHours() + 1, 0, 0, 0);
+      setRDate(d);
+    }
+    setEditorVisible(true);
+  };
+
+  const closeReminderEditor = () => setEditorVisible(false);
+
+  const handleSaveReminder = () => {
+    const error = validateReminderDraft({ title: rTitle, at: rDate, expiryDate }, new Date());
+    if (error) { toast.error(error); return; }
+    const fields = {
+      title: rTitle.trim(),
+      description: rDesc.trim(),
+      at: rDate.toISOString(),
+    };
+    setReminders((prev) => sortReminders(
+      editingReminder
+        // Keep triggeredAt (null for an editable entry) and id as-is.
+        ? prev.map((r) => (r.id === editingReminder.id ? { ...r, ...fields } : r))
+        : [...prev, {
+            id: `rem_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+            ...fields,
+            triggeredAt: null,
+          }],
+    ));
+    setEditorVisible(false);
+  };
+
+  const handleDeleteReminder = (id) => {
+    // Only reachable from a future reminder's row — triggered entries
+    // render no buttons at all.
+    setReminders((prev) => prev.filter((r) => r.id !== id));
+  };
+
+  // The local `reminders` copy is seeded once at mount, so a triggered
+  // stamp made by the context sweep while THIS screen is open never
+  // reaches the rows here — worse, saving the task would write the stale
+  // `triggeredAt: null` back over the stamp and resurrect the reminder as
+  // editable. Two stamp-only fixes (null → stamped, never the reverse, so
+  // in-flight edits stay safe):
+  // - mirror the live task's stamps from context whenever they change;
+  // - a 30s tick stamps locally-due entries so a row flips to read-only
+  //   promptly instead of waiting for the context's 60s sweep.
+  const liveReminders =
+    state.tasks.find((t) => t.id === editingTask?.id)?.reminders || null;
+  useEffect(() => {
+    if (!liveReminders) return;
+    setReminders((prev) => {
+      let changed = false;
+      const next = prev.map((r) => {
+        if (r.triggeredAt) return r;
+        const live = liveReminders.find((lr) => lr.id === r.id);
+        if (live?.triggeredAt) { changed = true; return { ...r, triggeredAt: live.triggeredAt }; }
+        return r;
+      });
+      return changed ? next : prev;
+    });
+  }, [liveReminders]);
+  useEffect(() => {
+    const tick = setInterval(() => {
+      setReminders((prev) => markDueReminderList(prev, new Date()));
+    }, 30000);
+    return () => clearInterval(tick);
+  }, []);
 
   // Before-expiry reminder state. `beforeExpiryMinutes` is the value used
   // when saving (a number or null). The custom stepper drives a
@@ -222,8 +322,7 @@ export default function AddTaskScreen() {
     categoryId,
     priority,
     expiryDate: expiryDate ? expiryDate.getTime() : null,
-    customOn,
-    customDate: customDate ? customDate.getTime() : null,
+    reminders: reminders.map((r) => ({ ...r })),
     beforeExpiryOn,
     beforeExpiryMinutes,
   };
@@ -281,13 +380,6 @@ export default function AddTaskScreen() {
 
   const handleSubmit = () => {
     if (!title.trim()) { toast.error('Please enter a task title.'); return; }
-    if (customOn && isPast(customDate)) {
-      toast.error('Custom reminder must be in the future.'); return;
-    }
-    // Reminder must also be before the expiry when one is set.
-    if (customOn && expiryDate && customDate > expiryDate) {
-      toast.error('Custom reminder cannot be after the expiry date.'); return;
-    }
     if (beforeExpiryOn && !expiryDate) {
       toast.error('Set an expiry date to use a before-expiry reminder.'); return;
     }
@@ -309,7 +401,21 @@ export default function AddTaskScreen() {
       categoryId,
       priority,
       expiryDate: expiryDate ? expiryDate.toISOString() : null,
-      customReminderTime: customOn ? customDate.toISOString() : null,
+      // Kept null for backup-code compatibility — the custom one-shot
+      // was replaced by the `reminders` list (v1.4.6).
+      customReminderTime: null,
+      // A triggered reminder must survive a save: merge in any triggeredAt
+      // the context sweep stamped after this screen mounted — writing the
+      // local copy verbatim could resurrect it as editable (the local
+      // sync effect closes the window too, this covers the race).
+      reminders: reminders.map((r) => {
+        if (r.triggeredAt) return { ...r };
+        const live = isEditing
+          ? state.tasks.find((t) => t.id === editingTask.id)?.reminders
+              ?.find((lr) => lr.id === r.id)
+          : null;
+        return live?.triggeredAt ? { ...r, triggeredAt: live.triggeredAt } : { ...r };
+      }),
       beforeExpiryMinutes: beforeExpiryOn ? beforeExpiryMinutes : null,
       status:      editingTask?.status    || 'pending',
       createdAt:   editingTask?.createdAt || new Date().toISOString(),
@@ -381,20 +487,22 @@ export default function AddTaskScreen() {
                 key={cat.id}
                 style={[
                   styles.catChip,
-                  { borderColor: cat.color + '55', backgroundColor: COLORS.surfaceAlt },
-                  categoryId === cat.id && { backgroundColor: cat.color + '22', borderColor: cat.color },
+                  // mono(): stored category colors render grayscale while
+                  // the white accent (dark mode) is active.
+                  { borderColor: mono(cat.color) + '55', backgroundColor: COLORS.surfaceAlt },
+                  categoryId === cat.id && { backgroundColor: mono(cat.color) + '22', borderColor: mono(cat.color) },
                 ]}
                 onPress={() => setCategoryId(cat.id)}
               >
                 <Ionicons
                   name={cat.icon}
                   size={14}
-                  color={categoryId === cat.id ? cat.color : COLORS.textSub}
+                  color={categoryId === cat.id ? mono(cat.color) : COLORS.textSub}
                 />
                 <Text style={[
                   styles.catChipText,
                   { color: COLORS.textSub },
-                  categoryId === cat.id && { color: cat.color },
+                  categoryId === cat.id && { color: mono(cat.color) },
                 ]}>
                   {cat.name}
                 </Text>
@@ -417,7 +525,13 @@ export default function AddTaskScreen() {
                 ]}
                 onPress={() => setPriority(p.label)}
               >
-                <Ionicons name={p.icon} size={14} color={priority === p.label ? p.color : COLORS.textSub} />
+                {/* Radio dot — hollow circle when unselected, filled when
+                    the priority is picked (user request). */}
+                <Ionicons
+                  name={priority === p.label ? 'ellipse' : 'ellipse-outline'}
+                  size={14}
+                  color={priority === p.label ? p.color : COLORS.textSub}
+                />
                 <Text style={[
                   styles.catChipText,
                   { color: COLORS.textSub },
@@ -444,59 +558,74 @@ export default function AddTaskScreen() {
           />
         </View>
 
-        {/* Reminders — two opt-in cards. */}
+        {/* Reminders — the custom-reminders list + the before-expiry opt-in card. */}
         <View style={styles.field}>
           <Text style={[styles.label, { color: COLORS.textMuted }]}>REMINDERS</Text>
 
-          {/* Custom one-shot reminder — tap the header to toggle. */}
+          {/* Custom reminders — multiple per task, one notification each. */}
           <View style={[styles.card, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border }]}>
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={() => setCustomOn(v => !v)}
-              style={styles.cardHeader}
-            >
+            <View style={styles.cardHeader}>
               <View style={[styles.cardIconWrap, { backgroundColor: COLORS.accent + '22' }]}>
                 <Ionicons name="notifications-outline" size={18} color={COLORS.accent} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.cardTitle, { color: COLORS.text }]}>Custom reminder</Text>
+                <Text style={[styles.cardTitle, { color: COLORS.text }]}>Custom reminders</Text>
                 <Text style={[styles.cardSub, { color: COLORS.textMuted }]}>
-                  {customOn
-                    ? `${format(customDate, 'EEE, MMM d • h:mm a')}${
-                        expiryDate && customDate > expiryDate ? ' · after expiry!' : ''
-                      }`
-                    : 'Tap to enable — one-shot at a specific time'}
+                  {(() => {
+                    const upcoming = reminders.filter((r) => !r.triggeredAt).length;
+                    if (reminders.length === 0) return 'None yet — add one below';
+                    if (upcoming === 0) return 'All reminded';
+                    return `${upcoming} upcoming reminder${upcoming === 1 ? '' : 's'}`;
+                  })()}
                 </Text>
               </View>
-              {customOn && (
-                <TouchableOpacity
-                  onPress={(e) => { e?.stopPropagation?.(); setCustomOn(false); }}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Ionicons name="close-circle" size={20} color={COLORS.textMuted} />
-                </TouchableOpacity>
-              )}
-            </TouchableOpacity>
+            </View>
 
-            {customOn && (
-              <View style={{ marginTop: 10 }}>
-                <MonthGridCalendar
-                  value={customDate}
-                  onChange={setCustomDate}
-                  minDate={new Date()}
-                  maxDate={expiryDate}
-                  accent={COLORS.accent}
-                  surface={COLORS.surface}
-                  surfaceAlt={COLORS.surfaceAlt}
-                  border={COLORS.border}
-                  text={COLORS.text}
-                  textMuted={COLORS.textMuted}
-                />
-                <View style={{ marginTop: 10 }}>
-                  <TimeField label="TIME" value={customDate} onChange={setCustomDate} COLORS={COLORS} />
+            {reminders.map((r) => (
+              r.triggeredAt ? (
+                // Past its time — read-only, no edit/delete. The exact
+                // wording is the feature contract ("reminded X at T on D").
+                <Text key={r.id} style={[styles.remindedText, { color: COLORS.textMuted }]}>
+                  {`reminded ${r.title} at ${format(new Date(r.at), 'h:mm a')} on ${format(new Date(r.at), 'MMM d, yyyy')}`}
+                </Text>
+              ) : (
+                <View key={r.id} style={[styles.reminderRow, { borderColor: COLORS.border }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.reminderRowTitle, { color: COLORS.text }]}>
+                      {r.title}
+                    </Text>
+                    <Text style={[styles.reminderRowDate, { color: COLORS.textMuted }]}>
+                      {format(new Date(r.at), 'EEE, MMM d • h:mm a')}
+                    </Text>
+                    {r.description ? (
+                      <Text style={[styles.reminderRowDesc, { color: COLORS.textMuted }]}>
+                        {r.description}
+                      </Text>
+                    ) : null}
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => openReminderEditor(r)}
+                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                  >
+                    <Ionicons name="pencil" size={18} color={COLORS.textMuted} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => handleDeleteReminder(r.id)}
+                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                  >
+                    <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
+                  </TouchableOpacity>
                 </View>
-              </View>
-            )}
+              )
+            ))}
+
+            <TouchableOpacity
+              style={[styles.setBtn, { borderColor: COLORS.accent }]}
+              onPress={() => openReminderEditor(null)}
+            >
+              <Ionicons name="add" size={16} color={COLORS.accent} />
+              <Text style={[styles.setBtnText, { color: COLORS.accent }]}>Add reminder</Text>
+            </TouchableOpacity>
           </View>
 
           {/* Before-expiry reminder — only available when an expiry is set. */}
@@ -642,6 +771,82 @@ export default function AddTaskScreen() {
         <View style={{ height: 40 }} />
       </ScrollView>
 
+      {/* Reminder editor — add/edit one custom reminder (mirrors the
+          HobbiesScreen modal form pattern). */}
+      <Modal visible={editorVisible} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modal, { backgroundColor: COLORS.surface, borderColor: COLORS.border }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: COLORS.text }]}>
+                {editingReminder ? 'Edit reminder' : 'New reminder'}
+              </Text>
+              <TouchableOpacity onPress={closeReminderEditor}>
+                <Ionicons name="close" size={22} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={styles.modalScroll}
+              contentContainerStyle={styles.modalScrollContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+
+              <Text style={[styles.fieldLabel, { color: COLORS.textMuted }]}>TITLE</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border, color: COLORS.text }]}
+                placeholder="e.g. Take meds, Call back"
+                placeholderTextColor={COLORS.textMuted}
+                value={rTitle}
+                onChangeText={setRTitle}
+                maxLength={60}
+              />
+
+              <Text style={[styles.fieldLabel, { color: COLORS.textMuted }]}>DESCRIPTION</Text>
+              <TextInput
+                style={[styles.input, styles.textArea, { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.border, color: COLORS.text }]}
+                placeholder="Optional details shown in the notification..."
+                placeholderTextColor={COLORS.textMuted}
+                value={rDesc}
+                onChangeText={setRDesc}
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
+              />
+
+              <Text style={[styles.fieldLabel, { color: COLORS.textMuted }]}>DATE</Text>
+              <MonthGridCalendar
+                value={rDate}
+                onChange={setRDate}
+                minDate={new Date()}
+                maxDate={expiryDate}
+                accent={COLORS.accent}
+                onAccent={COLORS.onAccent}
+                surface={COLORS.surface}
+                surfaceAlt={COLORS.surfaceAlt}
+                border={COLORS.border}
+                text={COLORS.text}
+                textMuted={COLORS.textMuted}
+              />
+
+              <View style={{ marginTop: 10 }}>
+                <TimeField label="TIME" value={rDate} onChange={setRDate} COLORS={COLORS} />
+              </View>
+
+              <TouchableOpacity
+                style={[styles.saveReminderBtn, { backgroundColor: COLORS.accent }]}
+                onPress={handleSaveReminder}
+              >
+                <Text style={[styles.saveReminderBtnText, { color: COLORS.onAccent }]}>
+                  {editingReminder ? 'Save changes' : 'Add reminder'}
+                </Text>
+              </TouchableOpacity>
+
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       <ConfirmDialog
         visible={guard.confirmVisible}
         title="Discard changes?"
@@ -748,4 +953,29 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   stepperSummary: { fontSize: 11, textAlign: 'center', marginTop: 2 },
+
+  // Custom reminders list rows (inside the reminders card).
+  reminderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  reminderRowTitle: { fontSize: 14, fontWeight: '700' },
+  reminderRowDate: { fontSize: 11, marginTop: 2 },
+  reminderRowDesc: { fontSize: 11, marginTop: 4 },
+  remindedText: { fontSize: 11, fontStyle: 'italic', marginTop: 10 },
+
+  // Reminder editor modal (mirrors the HobbiesScreen modal).
+  modalOverlay: { flex: 1, backgroundColor: '#000000AA', justifyContent: 'flex-end' },
+  modal:        { borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: SPACING.xl, borderWidth: 1, borderBottomWidth: 0, height: '92%' },
+  modalHeader:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  modalTitle:   { ...FONTS.heading, fontSize: 20 },
+  modalScroll:  { flex: 1 },
+  modalScrollContent: { paddingBottom: SPACING.xxl },
+  fieldLabel:   { ...FONTS.label, marginBottom: SPACING.sm, fontSize: 11 },
+  saveReminderBtn:     { borderRadius: RADIUS.lg, paddingVertical: 14, alignItems: 'center', marginTop: SPACING.lg, ...SHADOW.accent },
+  saveReminderBtnText: { fontSize: 16, fontWeight: '800' },
 });

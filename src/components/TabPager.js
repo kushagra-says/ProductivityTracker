@@ -120,6 +120,15 @@ export default function TabPager({ navRef, tabStateRef, pagerRef, pages }) {
   );
   const pagerEnabled = focusedDepth <= 1;
 
+  // Belt-and-suspenders for the swipe lock: the scrollEnabled prop above is
+  // correct in pager-view@8, but this also drives the native codegen command
+  // (setScrollEnabledImperatively) directly on every change, so the lock never
+  // depends on prop diffing alone. Tab-bar taps are unaffected — setPage
+  // commands ignore scrollEnabled.
+  useEffect(() => {
+    pagerRef.current?.setScrollEnabled?.(pagerEnabled);
+  }, [pagerEnabled, pagerRef, pages, focus, focusedDepth]);
+
   const tabNav = { navRef, tabStateRef, registryRef, pagerRef };
 
   return (
@@ -130,7 +139,10 @@ export default function TabPager({ navRef, tabStateRef, pagerRef, pages }) {
             ref={pagerRef}
             style={{ flex: 1 }}
             initialPage={0}
-            enabled={pagerEnabled}
+            // react-native-pager-view@8 renamed the disable-swipe prop from
+            // `enabled` to `scrollEnabled`; `enabled` is silently dropped by
+            // the codegen component, so pushed screens stayed swipeable.
+            scrollEnabled={pagerEnabled}
             onPageSelected={onPageSelected}
             onPageScroll={(e) => markAround(e.nativeEvent.position)}
           >

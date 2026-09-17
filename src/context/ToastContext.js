@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
+import { Animated, Modal, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme, FONTS, RADIUS, SPACING } from '../utils/theme';
@@ -57,31 +57,44 @@ export function ToastProvider({ children }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
+      {/* The toast renders inside its own transparent Modal — a plain
+          absolute view always sits BEHIND any open RN Modal (the reminder
+          editor, ConfirmDialog, … render in a separate native window above
+          the normal hierarchy). A Modal mounted LATER stacks on top of
+          those, so a toast raised over an open popup is visible. Its
+          pointerEvents="none" keeps the popup below fully interactive. */}
       {toast && (
-        <Animated.View
+        <Modal
+          visible
+          transparent
+          animationType="none"
+          statusBarTranslucent
           pointerEvents="none"
-          style={[
-            styles.wrap,
-            {
-              top: insets.top + 8,
-              backgroundColor: COLORS.surface,
-              borderColor: (toast.color || COLORS.accent) + '66',
-              opacity,
-              transform: [{ translateY }],
-            },
-          ]}
         >
-          <View style={[styles.iconWrap, { backgroundColor: (toast.color || COLORS.accent) + '22' }]}>
-            <Ionicons
-              name="checkmark-circle"
-              size={16}
-              color={toast.color || COLORS.accent}
-            />
-          </View>
-          <Text style={[styles.text, { color: COLORS.text }]} numberOfLines={2}>
-            {toast.message}
-          </Text>
-        </Animated.View>
+          <Animated.View
+            style={[
+              styles.wrap,
+              {
+                top: insets.top + 8,
+                backgroundColor: COLORS.surface,
+                borderColor: (toast.color || COLORS.accent) + '66',
+                opacity,
+                transform: [{ translateY }],
+              },
+            ]}
+          >
+            <View style={[styles.iconWrap, { backgroundColor: (toast.color || COLORS.accent) + '22' }]}>
+              <Ionicons
+                name="checkmark-circle"
+                size={16}
+                color={toast.color || COLORS.accent}
+              />
+            </View>
+            <Text style={[styles.text, { color: COLORS.text }]} numberOfLines={2}>
+              {toast.message}
+            </Text>
+          </Animated.View>
+        </Modal>
       )}
     </ToastContext.Provider>
   );

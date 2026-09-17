@@ -28,6 +28,9 @@ export default function InlineTimePicker({
   border,
   text,
   textMuted,
+  // Content color for the ACTIVE AM/PM pill — dark in the monochrome
+  // (Paper) mode where the accent bg is white. Defaults to white.
+  onAccent = '#fff',
 }) {
   const hour24 = value.getHours();
   const minute = value.getMinutes();
@@ -85,7 +88,7 @@ export default function InlineTimePicker({
           ]}
           onPress={() => apply(hour12, minute, false)}
         >
-          <Text style={[styles.ampmText, { color: !isPM ? '#fff' : textMuted }]}>AM</Text>
+          <Text style={[styles.ampmText, { color: !isPM ? onAccent : textMuted }]}>AM</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[
@@ -98,7 +101,7 @@ export default function InlineTimePicker({
           ]}
           onPress={() => apply(hour12, minute, true)}
         >
-          <Text style={[styles.ampmText, { color: isPM ? '#fff' : textMuted }]}>PM</Text>
+          <Text style={[styles.ampmText, { color: isPM ? onAccent : textMuted }]}>PM</Text>
         </TouchableOpacity>
       </View>
     </View>

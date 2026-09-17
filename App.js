@@ -76,11 +76,14 @@ function TaskStack() {
   const theme = useNavTheme();
   return (
     <NavigationIndependentTree>
-      <NavigationContainer theme={theme}>
-        <Stack.Navigator
-          screenOptions={{ headerShown: false }}
-          onStateChange={(st) => onDepth('Tasks', st?.routes.length ?? 1)}
-        >
+      {/* onStateChange is a NavigationContainer prop — on the Navigator it is
+          silently ignored, which left stack depths stuck at 1 and the pager
+          swipe lock never engaging (and back popping wrongly). */}
+      <NavigationContainer
+        theme={theme}
+        onStateChange={(st) => onDepth('Tasks', st?.routes.length ?? 1)}
+      >
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="TasksList">
             {(props) => (
               <>
@@ -101,11 +104,11 @@ function HobbiesStack() {
   const theme = useNavTheme();
   return (
     <NavigationIndependentTree>
-      <NavigationContainer theme={theme}>
-        <Stack.Navigator
-          screenOptions={{ headerShown: false }}
-          onStateChange={(st) => onDepth('Hobbies', st?.routes.length ?? 1)}
-        >
+      <NavigationContainer
+        theme={theme}
+        onStateChange={(st) => onDepth('Hobbies', st?.routes.length ?? 1)}
+      >
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="HobbiesList"  component={HobbiesScreen} />
           <Stack.Screen name="HobbyDetail"  component={HobbyDetailScreen} />
           <Stack.Screen name="EditHobby"    component={EditHobbyScreen} />
@@ -120,11 +123,11 @@ function CategoryStack() {
   const theme = useNavTheme();
   return (
     <NavigationIndependentTree>
-      <NavigationContainer theme={theme}>
-        <Stack.Navigator
-          screenOptions={{ headerShown: false }}
-          onStateChange={(st) => onDepth('Categories', st?.routes.length ?? 1)}
-        >
+      <NavigationContainer
+        theme={theme}
+        onStateChange={(st) => onDepth('Categories', st?.routes.length ?? 1)}
+      >
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="CategoriesList" component={CategoriesScreen} />
           <Stack.Screen name="EditCategory"   component={EditCategoryScreen} />
         </Stack.Navigator>

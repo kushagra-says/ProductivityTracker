@@ -14,7 +14,7 @@ import LineChart, { ChartLegend } from './LineChart';
  * Width is fluid: the inner chart adapts to whatever width the parent gives it.
  */
 export default function MonthlyCategoryLineChart({ tasks, categories }) {
-  const { COLORS } = useTheme();
+  const { COLORS, mono } = useTheme();
   const [selectedMonth, setSelectedMonth] = useState(new Date());
 
   const isCurrentMonth = format(selectedMonth, 'yyyy-MM') === format(new Date(), 'yyyy-MM');
@@ -68,7 +68,7 @@ export default function MonthlyCategoryLineChart({ tasks, categories }) {
   // Include ALL days of the month (zero on inactive days) so the line dips
   // to the baseline on idle days instead of bridging across them.
   const series = visibleCats.map((cat) => ({
-    color: cat.color,
+    color: mono(cat.color),
     name: cat.name,
     hidden: !!hidden[cat.id],
     data: cat.daily.map((d) => ({ x: d.day, y: d.count })),

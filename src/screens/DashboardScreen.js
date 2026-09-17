@@ -39,6 +39,8 @@ function StatCard({ label, value, color, icon, COLORS }) {
 const MemoStatCard = React.memo(StatCard);
 
 function TaskRow({ task, categories, onComplete, COLORS }) {
+  // mono(): stored colors render grayscale under the white accent (dark).
+  const { mono } = useTheme();
   const cat = categories.find((c) => c.id === task.categoryId);
   const statusColor = {
     pending: COLORS.accent,
@@ -98,9 +100,9 @@ function TaskRow({ task, categories, onComplete, COLORS }) {
 
         <View style={styles.taskMetaRow}>
           {cat && (
-            <View style={[styles.pill, { backgroundColor: cat.color + '22' }]}>
-              <Ionicons name={cat.icon} size={11} color={cat.color} />
-              <Text style={[styles.pillText, { color: cat.color }]}>{cat.name}</Text>
+            <View style={[styles.pill, { backgroundColor: mono(cat.color) + '22' }]}>
+              <Ionicons name={cat.icon} size={11} color={mono(cat.color)} />
+              <Text style={[styles.pillText, { color: mono(cat.color) }]}>{cat.name}</Text>
             </View>
           )}
           {priorityMeta && (
@@ -126,6 +128,7 @@ function TaskRow({ task, categories, onComplete, COLORS }) {
 const MemoTaskRow = React.memo(TaskRow);
 
 function HobbyRow({ hobby, onToggle, COLORS, today }) {
+  const { mono } = useTheme();
   const done = !!(hobby.completions && hobby.completions[today]);
 
   return (
@@ -136,12 +139,12 @@ function HobbyRow({ hobby, onToggle, COLORS, today }) {
         styles.hobbyRow,
         {
           backgroundColor: COLORS.surfaceAlt,
-          borderColor: done ? hobby.color + '66' : COLORS.border,
+          borderColor: done ? mono(hobby.color) + '66' : COLORS.border,
         },
       ]}
     >
-      <View style={[styles.hobbyIconWrap, { backgroundColor: hobby.color + '22' }]}>
-        <Ionicons name={hobby.icon} size={20} color={hobby.color} />
+      <View style={[styles.hobbyIconWrap, { backgroundColor: mono(hobby.color) + '22' }]}>
+        <Ionicons name={hobby.icon} size={20} color={mono(hobby.color)} />
       </View>
 
       <Text
@@ -159,8 +162,8 @@ function HobbyRow({ hobby, onToggle, COLORS, today }) {
         style={[
           styles.hobbyCheck,
           {
-            borderColor: hobby.color,
-            backgroundColor: done ? hobby.color : 'transparent',
+            borderColor: mono(hobby.color),
+            backgroundColor: done ? mono(hobby.color) : 'transparent',
           },
         ]}
       >
@@ -174,7 +177,7 @@ const MemoHobbyRow = React.memo(HobbyRow);
 export default function DashboardScreen() {
   const { state, completeTask, toggleHobbyToday } = useApp();
   const tabNav = useTabNav();
-  const { COLORS, mode, toggleThemeMode } = useTheme();
+  const { COLORS, mode, toggleThemeMode, mono } = useTheme();
   const toast = useToast();
   const { refreshing, onRefresh } = usePullRefresh();
 
@@ -283,8 +286,8 @@ export default function DashboardScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={COLORS.accent}
-            colors={[COLORS.accent]}
+            tintColor={COLORS.onAccent}
+            colors={[COLORS.onAccent]}
           />
         }
       >
@@ -353,7 +356,8 @@ export default function DashboardScreen() {
                 style={[styles.wnNow, { backgroundColor: COLORS.accent }]}
                 onPress={seeWhatsNew}
               >
-                <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>
+                {/* onAccent: dark text in the monochrome (Paper) mode. */}
+                <Text style={{ color: COLORS.onAccent, fontSize: 13, fontWeight: '700' }}>
                   See now
                 </Text>
               </TouchableOpacity>
@@ -387,8 +391,8 @@ export default function DashboardScreen() {
                 style={[styles.addBtn, { backgroundColor: COLORS.accent }]}
                 onPress={() => tabNav.jumpTo('Hobbies')}
               >
-                <Ionicons name="add" size={16} color="#fff" />
-                <Text style={styles.addBtnText}>Add hobby</Text>
+                <Ionicons name="add" size={16} color={COLORS.onAccent} />
+                <Text style={[styles.addBtnText, { color: COLORS.onAccent }]}>Add hobby</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -417,8 +421,8 @@ export default function DashboardScreen() {
                 style={[styles.addBtn, { backgroundColor: COLORS.accent }]}
                 onPress={() => tabNav.navigateInTab('Tasks', 'AddTask')}
               >
-                <Ionicons name="add" size={16} color="#fff" />
-                <Text style={styles.addBtnText}>Add task</Text>
+                <Ionicons name="add" size={16} color={COLORS.onAccent} />
+                <Text style={[styles.addBtnText, { color: COLORS.onAccent }]}>Add task</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -447,11 +451,11 @@ export default function DashboardScreen() {
                 key={cat.id}
                 style={[
                   styles.catCard,
-                  { backgroundColor: COLORS.surfaceAlt, borderColor: cat.color + '55' },
+                  { backgroundColor: COLORS.surfaceAlt, borderColor: mono(cat.color) + '55' },
                 ]}
               >
-                <Ionicons name={cat.icon} size={20} color={cat.color} />
-                <Text style={[styles.catName, { color: cat.color }]} numberOfLines={1}>
+                <Ionicons name={cat.icon} size={20} color={mono(cat.color)} />
+                <Text style={[styles.catName, { color: mono(cat.color) }]} numberOfLines={1}>
                   {cat.name}
                 </Text>
                 <Text style={[styles.catCount, { color: COLORS.text }]}>
@@ -459,7 +463,7 @@ export default function DashboardScreen() {
                 </Text>
                 <View style={[styles.catBar, { backgroundColor: COLORS.border }]}>
                   <View
-                    style={[styles.catBarFill, { width: `${pct}%`, backgroundColor: cat.color }]}
+                    style={[styles.catBarFill, { width: `${pct}%`, backgroundColor: mono(cat.color) }]}
                   />
                 </View>
                 <Text style={[styles.catPct, { color: COLORS.textMuted }]}>{pct}%</Text>
@@ -541,7 +545,7 @@ const styles = StyleSheet.create({
   empty:     { borderRadius: RADIUS.lg, padding: SPACING.xl, alignItems: 'center', borderWidth: 1, gap: SPACING.sm },
   emptyText: { fontSize: 14, textAlign: 'center' },
   addBtn:    { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: RADIUS.md, paddingHorizontal: SPACING.lg, paddingVertical: 10, marginTop: SPACING.sm, ...SHADOW.accent },
-  addBtnText:{ color: '#fff', fontWeight: '700', fontSize: 14 },
+  addBtnText:{ fontWeight: '700', fontSize: 14 },
 
   // Hobby row
   hobbyRow: {

@@ -4,7 +4,7 @@
 
 ProductivityTracker is a single-user, on-device productivity journal. It doesn't sync to a server, it doesn't ask for an account, and it doesn't try to be a project-management suite. It is the smallest app that still does every one of these things well:
 
-- Manage a task list with categories, priorities, start/expiry dates, and two kinds of reminders.
+- Manage a task list with categories, priorities, expiry dates, and multiple reminders per task.
 - Track daily hobbies with streaks, longest streaks, and a full year history.
 - Watch a streak number on the dashboard grow as you keep up with *either* tasks or hobbies.
 - See your work as charts (per-category, per-priority, 7-day bars, monthly lines).
@@ -16,11 +16,11 @@ ProductivityTracker is a single-user, on-device productivity journal. It doesn't
 ## ✨ Features
 
 ### ✅ Task Tracker
-- Create tasks with title, notes, category, and one of three priority levels.
-- Optional start date and time, and an optional expiry date and time.
-- Two independent reminders per task:
+- Create tasks with title, notes, category, and one of three priority levels (hollow radio dot that fills on selection).
+- An optional expiry date and time.
+- Reminders per task:
   - **Before expiry** — `5 / 15 / 30 min`, `1 / 2 hour`, `1 day`, or a custom value.
-  - **Custom one-shot** — pick any future date and time.
+  - **Multiple custom reminders** — each with its own title, description, and future date/time. Once a reminder's time passes it is stamped historical and rendered read-only (`reminded <title> at <time> on <date>`) — it can no longer be edited or re-fire.
 - Auto-expire: any task whose expiry has passed flips to `expired` automatically.
 - Filter by status (`pending / completed / expired`) and category, search by name.
 - Each task card shows its status pill in the top-right, with the set priority as a compact chip in the meta row next to the category (a radio dot in the priority's colour plus the label) — no extra card height.
@@ -47,6 +47,7 @@ ProductivityTracker is a single-user, on-device productivity journal. It doesn't
 - Range filter: `All time` / `30 days` / `7 days` — every chart in the screen respects the range.
 - Task completions and hobby consistency as separate 7-day bar charts.
 - Per-category and per-priority breakdowns scoped to the selected range.
+- Hobby all-time stats: distinct days completed (a day with several hobbies counts once), best streak ever, current best streak, and a lowest-performer card naming the hobby with the fewest days completed.
 - A multi-category monthly line chart for spotting trends across categories.
 - Animated counters that ease between values on the hero stat.
 
@@ -59,13 +60,14 @@ ProductivityTracker is a single-user, on-device productivity journal. It doesn't
 ### 🎨 Themes
 - Two full palettes: **dark** (deep slate) and **cream** (warm beige), each polished and consistent.
 - Toggle from the dashboard header (sun/moon icon) — choice persists.
-- Ten accent colors in both themes (purple, teal, rose, amber, blue, coral, lime, fuchsia, mint, brown) — each tuned per palette, so dark's brown is a lighter shade that stays visible on near-black.
-- Per-theme accent memory: pick `teal` in dark and `brown` in cream, and both stick when you switch back.
+- Ten accent colors per theme (purple, teal, rose, amber, blue, coral, lime, fuchsia, mint, and dark's **Paper** — a white accent — or cream's brown), each tuned per palette.
+- **Paper (dark-only white accent)** — picking it drains all color from the entire app: every theme token and every stored hobby/category color renders black & white, while the color pickers stay colored so saved data keeps its real colors. Toggling back to any colored accent restores every stored color exactly. Content painted on accent surfaces (button labels, AM/PM pills, refresh spinner) flips dark so it stays visible.
+- Per-theme accent memory: pick `teal` in dark and `brown` in cream, and both stick when you switch back. A pre-1.4.8 dark `brown` choice migrates to Paper on load.
 - System status bar follows the theme.
 
 ### 🔔 Notifications
 - Three local notification channels of behavior:
-  - **Task reminders** (before expiry, custom one-shot, implicit 1 hr before expiry if the user hasn't picked one).
+  - **Task reminders** (before expiry, multiple custom reminders per task, implicit 1 hr before expiry if the user hasn't picked one).
   - **Daily "today's plan"** reminder at a time you pick — body reflects pending tasks/hobbies for the day.
   - **Morning briefing** at a time you pick — gentle start-of-day summary that lists the day's top 5 pending tasks, ordered High → Low priority with the oldest first within each priority.
   - **Streak-at-risk nudge** — fires the same day if you have a streak ≥ 1 and haven't done anything yet.
@@ -143,7 +145,7 @@ eas build --platform android # / ios
 
 Every change is gated by [`tests.md`](./tests.md) — the pre-commit gate. A `FAIL` blocks the commit; a `PARTIAL` is allowed only with a written justification.
 
-**Automated gate — 233 assertions.** The pure logic modules run in plain Node (no React, no native), so the same code the app executes is asserted directly:
+**Automated gate — 307 assertions.** The pure logic modules run in plain Node (no React, no native), so the same code the app executes is asserted directly:
 
 ```bash
 node tests/run-streak-tests.mjs          # 18  — global day-streak decisions
@@ -151,9 +153,12 @@ node tests/run-before-expiry-tests.mjs   # 52  — before-expiry presets, caps, 
 node tests/run-calendar-tests.mjs        # 35  — inline month-grid calendar layout
 node tests/run-year-grid-tests.mjs       # 106 — hobby history grid coordinates
 node tests/run-midnight-tests.mjs        # 22  — local-midnight rollover + auto-expire
+node tests/run-reminder-tests.mjs        # 30  — per-task reminders: migration, triggering, validation
+node tests/run-insights-tests.mjs        # 21  — hobby stats: distinct days, streaks, lowest performer
+node tests/run-theme-tests.mjs           # 23  — Paper accent color math + monochrome palette
 ```
 
-All five must print `0 fail` before a commit. The expected total is exactly **233 PASS** — if you added cases, update the count in `tests.md` section Z.
+All eight must print `0 fail` before a commit. The expected total is exactly **307 PASS** — if you added cases, update the count in `tests.md` section Z.
 
 **Manual checks** — everything that needs a screen or a device (notification sound/vibration, swipe feel, dialogs, theming) is marked `[MANUAL]` in `tests.md` and is checked off by hand before commit. The commit body carries a verbatim `TESTS` block in the reporting format defined at the top of `tests.md`.
 
@@ -185,12 +190,15 @@ ProductivityTracker/
 ├── README.md
 ├── BUGS.md                       # Bug reports, resolutions, reproduction steps
 ├── tests.md                      # Pre-commit test plan + reporting format
-├── tests/                        # Pure-logic Node suites (233 assertions, run pre-commit)
+├── tests/                        # Pure-logic Node suites (307 assertions, run pre-commit)
 │   ├── run-streak-tests.mjs
 │   ├── run-before-expiry-tests.mjs
 │   ├── run-calendar-tests.mjs
 │   ├── run-year-grid-tests.mjs
-│   └── run-midnight-tests.mjs
+│   ├── run-midnight-tests.mjs
+│   ├── run-reminder-tests.mjs
+│   ├── run-insights-tests.mjs
+│   └── run-theme-tests.mjs
 └── src/
     ├── context/
     │   ├── AppContext.js         # Global state, streak math, notification scheduling
@@ -198,7 +206,7 @@ ProductivityTracker/
     ├── screens/
     │   ├── DashboardScreen.js    # Streak, hobbies, upcoming tasks, categories
     │   ├── TasksScreen.js        # Searchable task list with filters
-    │   ├── AddTaskScreen.js      # New / edit task with reminders
+    │   ├── AddTaskScreen.js      # New / edit task with multiple custom reminders
     │   ├── CategoriesScreen.js   # Category list + add modal
     │   ├── EditCategoryScreen.js # Edit a single category
     │   ├── HobbiesScreen.js      # Hobby list with 7-day strip + add modal
@@ -220,13 +228,16 @@ ProductivityTracker/
     │   ├── usePullRefresh.js     # RefreshControl wrapper
     │   └── useUnsavedGuard.js    # Snapshot-based unsaved-changes guard
     └── utils/
-        ├── theme.js              # Palettes + ThemeProvider + accent presets
+        ├── theme.js              # Palettes + ThemeProvider + accent presets (incl. Paper)
+        ├── colors.js             # Pure color math: desaturation + monochrome palette
+        ├── taskReminders.js      # Per-task reminder migration, triggering, validation
+        ├── notificationsClient.js# Safe expo-notifications wrappers (Expo Go + dev builds)
         ├── streak.js             # Pure day-streak math (credited by task OR hobby)
         ├── midnight.js           # Local-midnight loop + today-key stamping
         ├── calendar.js           # Month-grid calendar helpers
         ├── yearGrid.js           # Hobby year-grid week/month coordinates
         ├── beforeExpiry.js       # Before-expiry presets, caps, formatting
-        ├── hobbyStats.js         # Per-hobby streaks, day helpers
+        ├── hobbyStats.js         # Per-hobby + cross-hobby stats (streaks, lowest)
         └── relTime.js            # Relative-time formatter
 ```
 
@@ -236,7 +247,7 @@ ProductivityTracker/
 
 Open Settings from the gear icon in the dashboard header to:
 - Switch between dark and cream themes.
-- Pick an accent color (purple / teal / rose / amber / blue / coral / lime / fuchsia / mint / brown — the same ten in both themes). The choice is remembered per theme.
+- Pick an accent color (purple / teal / rose / amber / blue / coral / lime / fuchsia / mint + **Paper** in dark or brown in cream). The choice is remembered per theme. Picking **Paper** in dark mode turns the entire app black & white.
 
 ---
 
@@ -254,7 +265,7 @@ Open Settings from the gear icon in the dashboard header to:
 
 | Permission | Reason |
 |---|---|
-| **Notifications** | Task reminders (before expiry, custom one-shot, implicit 1 hr warning), hobby daily reminders, "today's plan" reminder, morning briefing, streak-at-risk nudge. |
+| **Notifications** | Task reminders (before expiry, multiple custom reminders, implicit 1 hr warning), hobby daily reminders, "today's plan" reminder, morning briefing, streak-at-risk nudge. |
 
 ---
 

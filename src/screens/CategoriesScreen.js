@@ -31,7 +31,7 @@ const genId = () => `cat_${Date.now()}_${Math.random().toString(36).slice(2, 6)}
 
 export default function CategoriesScreen() {
   const { state, addCategory, deleteCategory } = useApp();
-  const { COLORS } = useTheme();
+  const { COLORS, mono } = useTheme();
   const navigation = useNavigation();
   const toast = useToast();
   const { refreshing, onRefresh } = usePullRefresh();
@@ -90,14 +90,15 @@ export default function CategoriesScreen() {
     const pct = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
     const iconName = isIoniconsName(cat.icon) ? cat.icon : FALLBACK_CATEGORY_ICON;
 
+    // mono(): stored colors render grayscale under the white accent.
     return (
-      <View style={[styles.catCard, { backgroundColor: COLORS.surfaceAlt, borderColor: cat.color + '40' }]}>
+      <View style={[styles.catCard, { backgroundColor: COLORS.surfaceAlt, borderColor: mono(cat.color) + '40' }]}>
         <View style={styles.catHeader}>
-          <View style={[styles.catIconWrap, { backgroundColor: cat.color + '22' }]}>
-            <Ionicons name={iconName} size={22} color={cat.color} />
+          <View style={[styles.catIconWrap, { backgroundColor: mono(cat.color) + '22' }]}>
+            <Ionicons name={iconName} size={22} color={mono(cat.color)} />
           </View>
           <View style={styles.catInfo}>
-            <Text style={[styles.catName, { color: cat.color }]}>{cat.name}</Text>
+            <Text style={[styles.catName, { color: mono(cat.color) }]}>{cat.name}</Text>
             <Text style={[styles.catSubtext, { color: COLORS.textMuted }]}>
               {tasks.length} task{tasks.length !== 1 ? 's' : ''} total
             </Text>
@@ -119,7 +120,7 @@ export default function CategoriesScreen() {
         </View>
 
         <View style={[styles.progressBar, { backgroundColor: COLORS.border }]}>
-          <View style={[styles.progressFill, { width: `${pct}%`, backgroundColor: cat.color }]} />
+          <View style={[styles.progressFill, { width: `${pct}%`, backgroundColor: mono(cat.color) }]} />
         </View>
 
         <View style={styles.catStats}>
@@ -135,7 +136,7 @@ export default function CategoriesScreen() {
             <View style={[styles.dot, { backgroundColor: COLORS.danger }]} />
             <Text style={[styles.catStatText, { color: COLORS.textSub }]}>{expired} expired</Text>
           </View>
-          <Text style={[styles.pctText, { color: cat.color }]}>{pct}%</Text>
+          <Text style={[styles.pctText, { color: mono(cat.color) }]}>{pct}%</Text>
         </View>
       </View>
     );
@@ -152,8 +153,8 @@ export default function CategoriesScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={COLORS.accent}
-            colors={[COLORS.accent]}
+            tintColor={COLORS.onAccent}
+            colors={[COLORS.onAccent]}
           />
         }
         ListHeaderComponent={
@@ -163,8 +164,8 @@ export default function CategoriesScreen() {
               style={[styles.addBtn, { backgroundColor: COLORS.accent }]}
               onPress={() => setModalVisible(true)}
             >
-              <Ionicons name="add" size={20} color="#fff" />
-              <Text style={styles.addBtnText}>New</Text>
+              <Ionicons name="add" size={20} color={COLORS.onAccent} />
+              <Text style={[styles.addBtnText, { color: COLORS.onAccent }]}>New</Text>
             </TouchableOpacity>
           </View>
         }
@@ -219,18 +220,21 @@ export default function CategoriesScreen() {
 
             <Text style={[styles.fieldLabel, { color: COLORS.textMuted }]}>COLOR</Text>
             <View style={styles.colorRow}>
+              {/* flex:1 cells put every color on one straight row that
+                  spans the modal; the scaled selected dot stays in its slot. */}
               {COLOR_OPTIONS.map(color => (
-                <TouchableOpacity
-                  key={color}
-                  style={[
-                    styles.colorDot,
-                    { backgroundColor: color },
-                    selectedColor === color && styles.colorDotSelected,
-                  ]}
-                  onPress={() => setSelectedColor(color)}
-                >
-                  {selectedColor === color && <Ionicons name="checkmark" size={12} color="#fff" />}
-                </TouchableOpacity>
+                <View key={color} style={styles.colorCell}>
+                  <TouchableOpacity
+                    style={[
+                      styles.colorDot,
+                      { backgroundColor: color },
+                      selectedColor === color && styles.colorDotSelected,
+                    ]}
+                    onPress={() => setSelectedColor(color)}
+                  >
+                    {selectedColor === color && <Ionicons name="checkmark" size={12} color="#fff" />}
+                  </TouchableOpacity>
+                </View>
               ))}
             </View>
 
@@ -282,7 +286,7 @@ const styles = StyleSheet.create({
   },
   title:      { ...FONTS.heading, fontSize: 28 },
   addBtn:     { flexDirection: 'row', alignItems: 'center', borderRadius: RADIUS.md, paddingHorizontal: 14, paddingVertical: 8, gap: 4, ...SHADOW.accent },
-  addBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  addBtnText: { fontWeight: '700', fontSize: 14 },
 
   catCard:    { borderRadius: RADIUS.lg, padding: SPACING.lg, marginBottom: SPACING.md, borderWidth: 1 },
   catHeader:  { flexDirection: 'row', alignItems: 'center', marginBottom: SPACING.md },
@@ -315,8 +319,12 @@ const styles = StyleSheet.create({
   iconGrid:        { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: SPACING.lg },
   iconBtn:         { width: 44, height: 44, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
 
-  colorRow:        { flexDirection: 'row', gap: 10, marginBottom: SPACING.lg, flexWrap: 'wrap' },
-  colorDot:        { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
+  colorRow:        { flexDirection: 'row', gap: 6, marginBottom: SPACING.lg },
+  colorCell:       { flex: 1, height: 44, alignItems: 'center', justifyContent: 'center' },
+  // Dot sized as a % of its flex cell (aspect-ratio circle) so the selected
+  // state's scale(1.15) can never exceed the cell bounds — Android clips
+  // overflowing content, which flattened the ring on narrow cells.
+  colorDot:        { width: '82%', aspectRatio: 1, borderRadius: 999, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
   colorDotSelected:{ borderColor: '#fff', transform: [{ scale: 1.15 }] },
 
   preview:     { flexDirection: 'row', alignItems: 'center', borderRadius: RADIUS.md, padding: SPACING.md, borderWidth: 1, gap: 10, marginBottom: SPACING.lg },
