@@ -11,6 +11,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // subpath — the new top-level API is a File/Directory class model that has
 // no StorageAccessFramework, which the backup export needs.
 import * as FileSystem from 'expo-file-system/legacy';
+// New API's File/Directory classes — used for the backup export write,
+// because the legacy SAF module rejects tree URIs whose host isn't
+// 'com.android.externalstorage' (e.g. the Downloads drawer pick reports
+// com.android.providers.downloads.documents, expo/expo#41859). The new
+// API accepts any tree URI via DocumentFile.fromTreeUri.
+import { File as FsFile, Directory as FsDirectory } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import { useApp } from '../context/AppContext';
@@ -169,15 +175,15 @@ export default function SettingsScreen() {
       const name = backupFileName();
 
       if (Platform.OS === 'android') {
-        const writeInto = async (dirUri) => {
-          const fileUri = await FileSystem.StorageAccessFramework.createFileAsync(
-            dirUri,
-            'application/json',
-            name,
-          );
-          await FileSystem.writeAsStringAsync(fileUri, json, {
-            encoding: FileSystem.EncodingType.UTF8,
-          });
+        const writeInto = (dirUri) => {
+          // New-API write: Directory.createFile goes through
+          // DocumentFile.fromTreeUri, which accepts every SAF tree
+          // (Downloads included). The legacy createFileAsync would throw
+          // "not a Storage Access Framework URI" for the Downloads
+          // provider's tree URI and the export dead-ended there.
+          const dir = new FsDirectory(dirUri);
+          const file = dir.createFile(name, 'application/json');
+          file.write(json);
         };
         const askForFolder = async () => {
           const perms = await FileSystem.StorageAccessFramework

@@ -22,7 +22,13 @@
       ]
     },
     "plugins": [
-      ["expo-splash-screen", { "backgroundColor": "#0D0D0F" }],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./src/components/icon.png",
+          "backgroundColor": "#0D0D0F"
+        }
+      ],
       [
         "expo-notifications",
         {
@@ -31,7 +37,8 @@
           "sounds": []
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-sharing"
     ],
     "extra": {
       "eas": {
